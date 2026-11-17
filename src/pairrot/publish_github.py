@@ -21,11 +21,6 @@ _FINGERPRINT = re.compile(r"<!-- pairrot:([0-9a-f]+) -->")
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _INLINE_S2_LIMIT = 5
 _SEVERITY_ORDER = {Severity.S1: 0, Severity.S2: 1, Severity.S3: 2}
-_INTRODUCED = {
-    "this_change": "本次变更引入",
-    "preexisting": "base 上已存在",
-    "unknown": "未能判断是否本次引入",
-}
 _LABELS = {category.value: label for label, category in CATEGORY_FROM_LABEL.items()}
 
 
@@ -90,27 +85,30 @@ def _anchor(finding: Finding, lines: set[int]) -> int | None:
     return None
 
 
+def _public_title(finding: Finding) -> str:
+    text = (finding.title or finding.trigger).strip().splitlines()[0]
+    return text[:40] or finding.category.value
+
+
 def _comment_body(finding: Finding) -> str:
     label = _LABELS.get(finding.category.value, finding.category.value)
-    verification = finding.verification
-    checked = "、".join(verification.checked) if verification and verification.checked else "已核对"
-    reason = verification.reason if verification and verification.reason else "无"
-    title = finding.trigger.strip().splitlines()[0] if finding.trigger.strip() else label
+    title = _public_title(finding)
+    consequence = finding.consequence.strip() or "未说明结果"
+    suggestion = finding.suggestion.strip() or "无"
     return (
         f"<!-- pairrot:{finding.fingerprint} -->\n"
         f"**[{finding.severity.value} {label}]** {title}\n\n"
-        f"触发：{finding.trigger}\n\n"
-        f"后果：{finding.consequence}\n\n"
-        f"已验证：{checked}。{reason}\n\n"
-        f"建议：{finding.suggestion or '无'}\n\n"
-        f"来源：{_INTRODUCED.get(finding.introduced_in.value, finding.introduced_in.value)}"
+        f"条件：{finding.trigger.strip()}\n\n"
+        f"结果：{consequence}\n\n"
+        f"建议：{suggestion}"
     )
 
 
 def _one_line(finding: Finding, note: str) -> str:
     label = _LABELS.get(finding.category.value, finding.category.value)
     location = f"{finding.location.file}:{finding.location.start_line}"
-    return f"- [{finding.severity.value} {label}] `{location}` {note} {finding.trigger}"
+    suffix = f"（{note}）" if note else ""
+    return f"- [{finding.severity.value} {label}] `{location}` {_public_title(finding)}{suffix}"
 
 
 def plan_publication(
@@ -129,13 +127,13 @@ def plan_publication(
         if finding.fingerprint in posted:
             continue
         if finding.severity == Severity.S3:
-            summary_only.append(_one_line(finding, "S3 只进摘要。"))
+            summary_only.append(_one_line(finding, ""))
             continue
         if line is None:
-            summary_only.append(_one_line(finding, "不在本次 diff 的可评论行上。"))
+            summary_only.append(_one_line(finding, "不在本次 diff 的可评论行上"))
             continue
         if finding.severity == Severity.S2 and s2_slots <= 0:
-            summary_only.append(_one_line(finding, "超出行内预算。"))
+            summary_only.append(_one_line(finding, "超出行内预算"))
             continue
         if finding.severity == Severity.S2:
             s2_slots -= 1
@@ -148,12 +146,12 @@ def plan_publication(
             )
         )
     for finding in report.summary.s1_undecided_pending_human:
-        pending_human.append(_one_line(finding, "待人工确认。"))
+        pending_human.append(_one_line(finding, "待人工确认"))
     seen_pending = {item.fingerprint for item in report.summary.s1_undecided_pending_human}
     for finding in report.undecided:
         if finding.fingerprint in seen_pending:
             continue
-        pending_human.append(_one_line(finding, "未判定，不作为确认意见。"))
+        pending_human.append(_one_line(finding, "未判定"))
 
     reviewed = "\n".join(f"- `{item.path}`" for item in report.reviewed) or "- 无"
     unreviewed = "\n".join(

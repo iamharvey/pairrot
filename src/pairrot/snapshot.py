@@ -79,6 +79,42 @@ def resolve_sha(repo: Path, rev: str) -> str:
     return git_text(repo, "rev-parse", "--verify", f"{rev}^{{commit}}").strip()
 
 
+def literal_pathspec(path: str) -> str:
+    """Keep brackets and globs as a literal path. Git otherwise treats them as wildcards."""
+    return ":(literal)" + path.replace("\\", "/")
+
+
+def merge_base(repo: Path, base_sha: str, head_sha: str) -> str:
+    """Three-dot base. Falls back to base_sha when the histories do not meet."""
+    completed = run_git(repo, "merge-base", base_sha, head_sha)
+    found = completed.stdout.strip()
+    if completed.returncode != 0 or not found:
+        return base_sha
+    return found
+
+
+def file_diff(
+    repo: Path,
+    base_sha: str,
+    head_sha: str,
+    path: str,
+    *,
+    context: int = 3,
+) -> str:
+    completed = run_git(
+        repo,
+        "diff",
+        f"-U{context}",
+        base_sha,
+        head_sha,
+        "--",
+        literal_pathspec(path),
+    )
+    if completed.returncode != 0:
+        return completed.stderr.strip()
+    return completed.stdout
+
+
 def skip_reason(path: str) -> str | None:
     name = path.replace("\\", "/").split("/")[-1].lower()
     if name in LOCK_BASENAMES or name.endswith(".lock") or name.endswith(".lockb"):
@@ -228,6 +264,7 @@ def take_snapshot(
     root = Path(repo)
     pinned_base = base_sha or resolve_sha(root, base)
     pinned_head = head_sha or resolve_sha(root, head)
+    pinned_base = merge_base(root, pinned_base, pinned_head)
     name_status = parse_name_status(
         git_text(root, "diff", "-z", "--name-status", pinned_base, pinned_head)
     )
@@ -259,8 +296,7 @@ def take_snapshot(
                 )
             )
             continue
-        diff = run_git(root, "diff", "-U0", pinned_base, pinned_head, "--", path)
-        ranges = parse_ranges(diff.stdout) if diff.returncode == 0 else []
+        ranges = parse_ranges(file_diff(root, pinned_base, pinned_head, path, context=0))
         reviewable.append(
             FileSpan(
                 path=path,

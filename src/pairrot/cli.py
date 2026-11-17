@@ -20,7 +20,7 @@ def _budget_from_env(cost_cap: float | None) -> Budget:
         cap = float(os.environ["PAIRROT_COST_CAP"])
     per = float(os.environ.get("PAIRROT_COST_PER_1K_TOKENS") or 0)
     wall = int(os.environ.get("PAIRROT_WALL_CLOCK_SECONDS") or 600)
-    tools = int(os.environ.get("PAIRROT_MAX_TOOL_CALLS") or 30)
+    tools = int(os.environ.get("PAIRROT_MAX_TOOL_CALLS") or 2)
     files = int(os.environ.get("PAIRROT_MAX_FILES") or 40)
     lines = int(os.environ.get("PAIRROT_MAX_CHANGED_LINES") or 2000)
     return Budget(

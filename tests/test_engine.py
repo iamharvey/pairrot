@@ -8,7 +8,7 @@ from pathlib import Path
 import httpx
 
 from pairrot.budget import BudgetTracker, Clock
-from pairrot.llm import ChatMessage, Completion, FakeModel, OpenAICompatibleClient, ToolCall
+from pairrot.llm import ChatMessage, Completion, FakeModel, OpenAICompatibleClient
 from pairrot.models import (
     OUT_OF_WHITELIST_LABEL,
     Budget,
@@ -257,29 +257,40 @@ def test_missing_model_fails_even_when_the_diff_is_partial():
 
 
 def test_tool_call_cap_is_per_perspective_and_defaults():
-    assert Budget().max_tool_calls_per_perspective == 30
+    assert Budget().max_tool_calls_per_perspective == 2
     assert Budget().wall_clock_seconds == 600
     assert Budget().max_files == 40
     assert Budget().max_changed_lines == 2000
     assert Budget().cost_cap is None
 
 
-def test_tool_budget_stops_and_marks_partial(tmp_path: Path):
+def test_lookup_followup_omits_the_diff_and_stops_at_the_cap(tmp_path: Path):
     repo, base, tip = _changed_repo(tmp_path)
+    seen: dict[str, str] = {}
 
     def handler(messages, tools, model):
-        return Completion(
-            message=ChatMessage(
-                role="assistant",
-                tool_calls=[
-                    ToolCall(
-                        id="call-1",
-                        name="read_file",
-                        arguments={"path": "app.py", "rev": "head", "start_line": 1, "end_line": 5},
-                    )
-                ],
+        assert tools is None
+        system = messages[0].content or ""
+        user = messages[-1].content or ""
+        if "独立验证" in system:
+            return _completion(
+                {
+                    "verdict": "confirmed",
+                    "reason": "成立",
+                    "checked": ["path_reachable"],
+                    "introduced_in": "this_change",
+                }
             )
-        )
+        if "切片 diff 已省略" in user:
+            seen["followup"] = user
+            return _completion({"findings": [_finding()]})
+        payload = _finding()
+        payload["lookup"] = [
+            {"tool": "search_code", "pattern": "add"},
+            {"tool": "search_code", "pattern": "return"},
+            {"tool": "read_file", "path": "app.py", "rev": "head", "start_line": 1, "end_line": 3},
+        ]
+        return _completion({"findings": [payload]})
 
     model = FakeModel(handler)
     report = review_change(
@@ -288,44 +299,37 @@ def test_tool_budget_stops_and_marks_partial(tmp_path: Path):
         tip,
         tmp_path / "out",
         llm=model,
-        budget=Budget(max_tool_calls_per_perspective=3),
+        budget=Budget(max_tool_calls_per_perspective=2),
     )
     assert report.status.value == "partial"
-    assert report.budget_exhausted
     assert "工具调用达到上限" in report.partial_reasons
-    assert report.confirmed == []
-    assert len(model.calls) == 5
-    assert model.calls[-1]["tools"] is None
+    assert len(report.confirmed) == 1
+    followup = seen["followup"]
+    assert "FILE app.py" not in followup
+    assert "未执行" in followup
+    assert all(call["tools"] is None for call in model.calls)
 
 
-def test_separate_tool_budgets_still_confirm(tmp_path: Path):
+def test_lookup_does_not_block_verification(tmp_path: Path):
     repo, base, tip = _changed_repo(tmp_path)
 
     def handler(messages, tools, model):
         system = messages[0].content or ""
-        if any(message.role == "tool" for message in messages):
-            if "独立验证" in system:
-                return _completion(
-                    {
-                        "verdict": "confirmed",
-                        "reason": "成立",
-                        "checked": ["path_reachable"],
-                        "introduced_in": "this_change",
-                    }
-                )
-            return _completion({"findings": [_finding()]})
-        return Completion(
-            message=ChatMessage(
-                role="assistant",
-                tool_calls=[
-                    ToolCall(
-                        id="call-1",
-                        name="read_file",
-                        arguments={"path": "app.py", "rev": "head", "start_line": 1, "end_line": 4},
-                    )
-                ],
+        user = messages[-1].content or ""
+        if "独立验证" in system:
+            return _completion(
+                {
+                    "verdict": "confirmed",
+                    "reason": "成立",
+                    "checked": ["path_reachable"],
+                    "introduced_in": "this_change",
+                }
             )
-        )
+        if "切片 diff 已省略" in user:
+            return _completion({"findings": [_finding()]})
+        payload = _finding()
+        payload["lookup"] = [{"tool": "search_code", "pattern": "add"}]
+        return _completion({"findings": [payload]})
 
     model = FakeModel(handler)
     report = review_change(
@@ -338,6 +342,7 @@ def test_separate_tool_budgets_still_confirm(tmp_path: Path):
     )
     assert report.status.value == "passed"
     assert len(report.confirmed) == 1
+    assert all(call["tools"] is None for call in model.calls)
 
 
 def test_cost_cap_stops_before_verify(tmp_path: Path):
@@ -589,3 +594,85 @@ def git_parent(repo: Path) -> str:
     from tests.conftest import git
 
     return git(repo, "rev-parse", "HEAD~1").stdout.strip()
+
+
+def test_snapshot_diffs_from_the_merge_base(tmp_path: Path):
+    from tests.conftest import git
+
+    repo = init_repo(tmp_path / "repo")
+    base = seed(repo, "def add(a, b):\n    return a + b\n", "app.py")
+    git(repo, "checkout", "-b", "feature")
+    write(repo, "app.py", "def add(a, b):\n    return a - b\n")
+    feature = commit(repo, "feature")
+    git(repo, "checkout", "main")
+    write(repo, "other.py", "x = 1\n")
+    main = commit(repo, "main moves")
+    snapshot = take_snapshot(repo, main, feature)
+    assert snapshot.base_sha == base
+    assert [span.path for span in snapshot.reviewed] == ["app.py"]
+    assert all(span.path != "other.py" for span in snapshot.reviewed + snapshot.unreviewed)
+
+
+def test_bracket_filename_diff_stays_on_that_file(tmp_path: Path):
+    from pairrot.snapshot import file_diff
+    from tests.conftest import git
+
+    repo = init_repo(tmp_path / "repo")
+    (repo / "app" / "[slug]").mkdir(parents=True)
+    (repo / "app" / "s").mkdir()
+    (repo / "app" / "[slug]" / "page.tsx").write_text("v1\n", encoding="utf-8")
+    (repo / "app" / "s" / "page.tsx").write_text("v1\n", encoding="utf-8")
+    git(repo, "add", "--", ":(literal)app/[slug]/page.tsx", ":(literal)app/s/page.tsx")
+    base = commit(repo, "base")
+    (repo / "app" / "[slug]" / "page.tsx").write_text("v2\n", encoding="utf-8")
+    (repo / "app" / "s" / "page.tsx").write_text("v2\n", encoding="utf-8")
+    git(repo, "add", "--", ":(literal)app/[slug]/page.tsx", ":(literal)app/s/page.tsx")
+    tip = commit(repo, "change")
+    diff = file_diff(repo, base, tip, "app/[slug]/page.tsx")
+    assert "app/[slug]/page.tsx" in diff
+    assert "app/s/page.tsx" not in diff
+    assert "+v2" in diff
+
+
+def test_large_diff_is_sliced_without_tools(tmp_path: Path):
+    repo = init_repo(tmp_path / "repo")
+    seed(repo, "seed\n", "README.md")
+    for name in ("a.py", "b.py", "c.py"):
+        write(repo, name, "".join(f"v{index}\n" for index in range(6000)))
+    tip = commit(repo, "big")
+    base = git_parent(repo)
+    model = FakeModel(lambda messages, tools, model: _completion({"findings": []}))
+    report = review_change(
+        repo,
+        base,
+        tip,
+        tmp_path / "out",
+        llm=model,
+        budget=Budget(max_changed_lines=100000),
+    )
+    assert report.status.value == "passed"
+    users = [call["messages"][1].content for call in model.calls]
+    assert len(users) >= 3
+    assert all(call["tools"] is None for call in model.calls)
+    assert not any(all(f"FILE {name}" in text for name in ("a.py", "b.py", "c.py")) for text in users)
+    blob = "\n".join(users)
+    assert "FILE a.py" in blob and "FILE b.py" in blob and "FILE c.py" in blob
+
+
+def test_verifier_rewrites_an_overstated_consequence(tmp_path: Path):
+    repo, base, tip = _changed_repo(tmp_path)
+    model = _scripted(
+        {"findings": [_finding(consequence="匹配不到文件本身", title="路径被当成通配符")]},
+        {
+            "verdict": "confirmed",
+            "reason": "文件本身仍能匹配",
+            "consequence": "还会匹配到其他文件",
+            "checked": ["consequence_exaggerated"],
+            "introduced_in": "this_change",
+        },
+    )
+    report = review_change(repo, base, tip, tmp_path / "out", llm=model)
+    assert report.confirmed[0].consequence == "还会匹配到其他文件"
+    assert report.confirmed[0].verification.reason == "文件本身仍能匹配"
+    assert report.confirmed[0].title == "路径被当成通配符"
+    assert all(call["tools"] is None for call in model.calls)

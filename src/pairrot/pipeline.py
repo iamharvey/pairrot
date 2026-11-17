@@ -19,7 +19,7 @@ from pairrot.models import (
     dump_model,
 )
 from pairrot.review import PROMPT_VERSION, load_sources, review_diff
-from pairrot.snapshot import GitError, resolve_sha, take_snapshot
+from pairrot.snapshot import GitError, merge_base, resolve_sha, take_snapshot
 from pairrot.tools import RepoTools
 from pairrot.verify import mark_undecided, verify_findings
 
@@ -173,6 +173,7 @@ def review_change(
     try:
         base_sha = resolve_sha(root, base)
         head_sha = resolve_sha(root, head)
+        base_sha = merge_base(root, base_sha, head_sha)
     except GitError as exc:
         report = _empty_report(
             status=RunStatus.failed,
@@ -245,14 +246,14 @@ def review_change(
             evidence_cache: dict[str, str] = {}
             review_tools = RepoTools(
                 root,
-                base_sha,
-                head_sha,
+                snapshot.base_sha,
+                snapshot.head_sha,
                 ticket_path=ticket_path,
                 ci_path=ci_path,
                 max_calls=budget.max_tool_calls_per_perspective,
                 cache=evidence_cache,
             )
-            findings, dropped, _loop = review_diff(
+            findings, dropped, diffs = review_diff(
                 llm=llm,
                 repo=root,
                 snapshot=snapshot,
@@ -262,23 +263,15 @@ def review_change(
                 sources=sources,
             )
             if findings and tracker.allow_model_call():
-                verify_tools = RepoTools(
-                    root,
-                    base_sha,
-                    head_sha,
-                    ticket_path=ticket_path,
-                    ci_path=ci_path,
-                    max_calls=budget.max_tool_calls_per_perspective,
-                    cache=evidence_cache,
-                )
                 findings = verify_findings(
                     llm=llm,
                     findings=findings,
                     tracker=tracker,
                     model=verifier_name,
-                    tool_host=verify_tools,
-                    base_sha=base_sha,
-                    head_sha=head_sha,
+                    sources=sources,
+                    diffs=diffs,
+                    base_sha=snapshot.base_sha,
+                    head_sha=snapshot.head_sha,
                 )
             elif findings:
                 reason = tracker.reasons[-1] if tracker.reasons else "预算用尽，未完成验证"
