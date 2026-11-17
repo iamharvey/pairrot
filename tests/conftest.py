@@ -56,6 +56,11 @@ def seed(repo: Path, text: str = "seed\n", name: str = "README.md") -> str:
     return commit(repo, "init")
 
 
+def ranges_overlap(left: tuple[int, int], right: tuple[int, int]) -> bool:
+    """Inclusive ranges overlap when each starts on or before the other ends."""
+    return left[0] <= right[1] and right[0] <= left[1]
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     return init_repo(tmp_path / "repo")
