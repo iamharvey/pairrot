@@ -76,6 +76,8 @@ def _decide_status(
     snapshot_partial: bool,
     finding_count: int,
 ) -> RunStatus:
+    if tracker.error and not tracker.produced and finding_count == 0:
+        return RunStatus.failed
     if tracker.exhausted or snapshot_partial:
         return RunStatus.partial
     if tracker.error:

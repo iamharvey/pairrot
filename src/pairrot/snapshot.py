@@ -194,7 +194,7 @@ def select_for_review(
             if len(reviewed) >= max_files:
                 cut_reason = f"超过文件数阈值（{max_files}）"
             elif used + file_lines > max_changed_lines:
-                cut_reason = f"超过行数阈值（{max_changed_lines}）"
+                cut_reason = f"行数预算已满（{max_changed_lines}），此文件未审"
         if cut_reason is not None:
             if cut_reason not in reasons:
                 reasons.append(cut_reason)
