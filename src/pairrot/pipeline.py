@@ -51,11 +51,11 @@ def reuse_key(
 
 def coverage_for(ticket: Path | None, ci: Path | None) -> Coverage:
     if ci is not None and Path(ci).is_file():
-        ci_note = "已读取本地 CI 结果"
+        ci_note = "检测到本地 CI 结果，但未参与审查"
     else:
         ci_note = "无 CI 结果"
     if ticket is not None and Path(ticket).is_file():
-        ticket_note = "已读取本地需求文件"
+        ticket_note = "检测到本地需求文件，但未参与审查"
     else:
         ticket_note = "未关联需求，未做业务意图核对"
     return Coverage(ci=ci_note, ticket=ticket_note)
@@ -283,7 +283,7 @@ def review_change(
                 max_calls=budget.max_tool_calls_per_perspective,
                 cache=evidence_cache,
             )
-            findings, dropped, diffs = review_diff(
+            findings, dropped, diffs, packs = review_diff(
                 llm=llm,
                 repo=root,
                 snapshot=snapshot,
@@ -294,20 +294,24 @@ def review_change(
                 prompt=prompt_for(policy),
                 allowed=policy.llm_categories() if policy.active else None,
             )
-            if findings and tracker.allow_model_call():
-                findings = verify_findings(
+            pending = [finding for finding in findings if finding.verification is None]
+            held = [finding for finding in findings if finding.verification is not None]
+            if pending and tracker.allow_model_call():
+                pending = verify_findings(
                     llm=llm,
-                    findings=findings,
+                    findings=pending,
                     tracker=tracker,
                     model=verifier_name,
                     sources=sources,
                     diffs=diffs,
+                    packs=packs,
                     base_sha=snapshot.base_sha,
                     head_sha=snapshot.head_sha,
                 )
-            elif findings:
+            elif pending:
                 reason = tracker.reasons[-1] if tracker.reasons else "预算用尽，未完成验证"
-                findings = [mark_undecided(finding, reason) for finding in findings]
+                pending = [mark_undecided(finding, reason) for finding in pending]
+            findings = held + pending
 
     if policy.active and policy.secrets_enabled and snapshot.reviewed:
         findings = scan_added_secrets(root, snapshot) + findings

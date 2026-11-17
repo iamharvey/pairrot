@@ -18,6 +18,7 @@ from pairrot.models import (
     nearest_symbol,
     normalize_snippet,
 )
+from pairrot.evidence import PACK_LIMIT, EvidencePiece, render_pack
 from pairrot.pipeline import _decide_status, review_change
 from pairrot.redact import strip_secrets
 from pairrot.review import REVIEW_SYSTEM_PROMPT, validate_candidate
@@ -264,7 +265,7 @@ def test_tool_call_cap_is_per_perspective_and_defaults():
     assert Budget().cost_cap is None
 
 
-def test_lookup_followup_omits_the_diff_and_stops_at_the_cap(tmp_path: Path):
+def test_lookup_followup_keeps_a_bounded_pack_and_stops_at_the_cap(tmp_path: Path):
     repo, base, tip = _changed_repo(tmp_path)
     seen: dict[str, str] = {}
 
@@ -281,7 +282,7 @@ def test_lookup_followup_omits_the_diff_and_stops_at_the_cap(tmp_path: Path):
                     "introduced_in": "this_change",
                 }
             )
-        if "切片 diff 已省略" in user:
+        if "证据包" in user:
             seen["followup"] = user
             return _completion({"findings": [_finding()]})
         payload = _finding()
@@ -303,20 +304,29 @@ def test_lookup_followup_omits_the_diff_and_stops_at_the_cap(tmp_path: Path):
     )
     assert report.status.value == "partial"
     assert "工具调用达到上限" in report.partial_reasons
-    assert len(report.confirmed) == 1
+    assert report.confirmed == []
+    assert len(report.undecided) == 1
+    assert report.undecided[0].verification is not None
+    assert report.undecided[0].verification.reason == "查询证据不足，未完成复核"
     followup = seen["followup"]
-    assert "FILE app.py" not in followup
+    assert "FILE app.py" in followup
+    assert f'"rev": "{base}..{tip}"' in followup
+    assert '"source": "diff"' in followup
+    assert '"source": "lookup"' in followup
     assert "未执行" in followup
+    assert len(followup) < 32_000
     assert all(call["tools"] is None for call in model.calls)
 
 
 def test_lookup_does_not_block_verification(tmp_path: Path):
     repo, base, tip = _changed_repo(tmp_path)
+    seen: dict[str, str] = {}
 
     def handler(messages, tools, model):
         system = messages[0].content or ""
         user = messages[-1].content or ""
         if "独立验证" in system:
+            seen["verify"] = user
             return _completion(
                 {
                     "verdict": "confirmed",
@@ -325,7 +335,7 @@ def test_lookup_does_not_block_verification(tmp_path: Path):
                     "introduced_in": "this_change",
                 }
             )
-        if "切片 diff 已省略" in user:
+        if "证据包" in user:
             return _completion({"findings": [_finding()]})
         payload = _finding()
         payload["lookup"] = [{"tool": "search_code", "pattern": "add"}]
@@ -342,6 +352,12 @@ def test_lookup_does_not_block_verification(tmp_path: Path):
     )
     assert report.status.value == "passed"
     assert len(report.confirmed) == 1
+    verify = seen["verify"]
+    assert '"source": "lookup"' in verify
+    assert '"source": "diff"' in verify
+    assert '"source": "nearby"' in verify
+    assert f'"rev": "{tip}"' in verify
+    assert "search_code add" in verify
     assert all(call["tools"] is None for call in model.calls)
 
 
@@ -436,6 +452,21 @@ def test_tools_are_readonly_and_local(tmp_path: Path):
     assert missing.execute("get_ticket", {}) == "未关联需求，未做业务意图核对"
 
 
+def test_evidence_pack_names_source_and_rev_and_stays_within_the_cap():
+    pieces = [
+        EvidencePiece("lookup", "abc123", "search_code add", "hit line", True),
+        EvidencePiece("diff", "base..head", "app.py", "x" * 20_000, True),
+    ]
+    text = render_pack(pieces, limit=500)
+    assert len(text) <= 500
+    assert '"source": "lookup"' in text
+    assert '"rev": "abc123"' in text
+    assert '"complete": false' in text
+    full = render_pack(pieces)
+    assert len(full) <= PACK_LIMIT
+    assert "base..head" in full
+
+
 def test_coverage_gaps_are_on_the_report(tmp_path: Path):
     repo, base, tip = _changed_repo(tmp_path)
     model = _scripted({"findings": []}, {"verdict": "confirmed", "reason": "", "checked": []})
@@ -444,6 +475,33 @@ def test_coverage_gaps_are_on_the_report(tmp_path: Path):
     assert report.coverage.ticket == "未关联需求，未做业务意图核对"
     assert report.base_sha == base
     assert report.head_sha == tip
+
+
+def test_present_ticket_and_ci_are_not_described_as_read(tmp_path: Path):
+    repo, base, tip = _changed_repo(tmp_path)
+    ticket = tmp_path / "ticket.txt"
+    ci = tmp_path / "ci.json"
+    ticket.write_text("需求正文唯一标记", encoding="utf-8")
+    ci.write_text('{"conclusion":"ci-only-marker"}', encoding="utf-8")
+
+    def review(messages):
+        blob = "\n".join(message.content or "" for message in messages)
+        assert "需求正文唯一标记" not in blob
+        assert "ci-only-marker" not in blob
+        return {"findings": []}
+
+    model = _scripted(review, {"verdict": "confirmed", "reason": "", "checked": []})
+    report = review_change(
+        repo,
+        base,
+        tip,
+        tmp_path / "out",
+        llm=model,
+        ticket=ticket,
+        ci=ci,
+    )
+    assert report.coverage.ticket == "检测到本地需求文件，但未参与审查"
+    assert report.coverage.ci == "检测到本地 CI 结果，但未参与审查"
 
 
 def test_artifact_reuse_skips_the_model(tmp_path: Path):
