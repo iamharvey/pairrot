@@ -143,6 +143,7 @@ class Finding(BaseModel):
     category: Category
     severity: Severity
     location: Location
+    title: str = ""
     trigger: str
     consequence: str = ""
     suggestion: str = ""
@@ -179,7 +180,7 @@ class FileSpan(BaseModel):
 class Budget(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    max_tool_calls_per_perspective: int = 30
+    max_tool_calls_per_perspective: int = 2
     wall_clock_seconds: int = 600
     max_files: int = 40
     max_changed_lines: int = 2000

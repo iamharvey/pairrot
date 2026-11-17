@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
 from pairrot.models import norm_path
 from pairrot.redact import strip_secrets
-from pairrot.snapshot import run_git
+from pairrot.snapshot import literal_pathspec, run_git
 
 _MAX_READ_LINES = 400
 _MAX_SEARCH_HITS = 50
@@ -160,12 +161,22 @@ class RepoTools:
         self.max_calls = max_calls
         self.calls = 0
         self.cache = cache if cache is not None else {}
+        self._lock = threading.Lock()
 
     def execute(self, name: str, arguments: dict[str, Any] | None) -> str:
-        self.calls += 1
+        result = self.try_execute(name, arguments)
+        if result is None:
+            return "工具调用达到上限，未执行"
+        return result
+
+    def try_execute(self, name: str, arguments: dict[str, Any] | None) -> str | None:
         args = arguments or {}
         key = name + "\n" + json.dumps(args, sort_keys=True, ensure_ascii=False, default=str)
-        cached = self.cache.get(key)
+        with self._lock:
+            if self.calls >= self.max_calls:
+                return None
+            self.calls += 1
+            cached = self.cache.get(key)
         if cached is not None:
             return cached
         try:
@@ -175,7 +186,8 @@ class RepoTools:
         result = strip_secrets(result)
         if not result:
             result = "无输出"
-        self.cache[key] = result
+        with self._lock:
+            self.cache[key] = result
         return result
 
     def _dispatch(self, name: str, args: dict[str, Any]) -> str:
@@ -270,7 +282,7 @@ class RepoTools:
                 str(limit),
                 self.head_sha,
                 "--",
-                safe,
+                literal_pathspec(safe),
             )
         else:
             completed = run_git(
@@ -305,7 +317,7 @@ class RepoTools:
             f"{start},{end}",
             self.head_sha,
             "--",
-            path,
+            literal_pathspec(path),
         )
         if completed.returncode != 0:
             return "git blame 失败: " + completed.stderr.strip()
