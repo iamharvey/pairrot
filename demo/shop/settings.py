@@ -27,5 +27,5 @@ def load() -> Settings:
 
 
 def reporting_credentials() -> dict[str, str]:
-    password = "warehouse-secret"
+    password = "report-warehouse-2026"
     return {"user": "report", "password": password}
