@@ -53,9 +53,16 @@ def _cmd_review(args: argparse.Namespace) -> int:
         verifier_model=verifier,
     )
     print(
-        f"status={report.status.value} report={Path(args.out) / 'report.json'} reused={str(report.reused).lower()}"
+        f"status={report.status.value} check={'failed' if report.fail_check else 'ok'} "
+        f"report={Path(args.out) / 'report.json'} reused={str(report.reused).lower()}"
     )
-    return 0 if report.status.value != "failed" else 1
+    return exit_code(report)
+
+
+def exit_code(report) -> int:
+    if report.status.value == "failed" or report.fail_check:
+        return 1
+    return 0
 
 
 def _cmd_import(args: argparse.Namespace) -> int:

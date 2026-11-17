@@ -95,8 +95,10 @@ def _comment_body(finding: Finding) -> str:
     title = _public_title(finding)
     consequence = finding.consequence.strip() or "未说明结果"
     suggestion = finding.suggestion.strip() or "无"
+    level = "必须处理\n\n" if finding.level == "must_fix" else ""
     return (
         f"<!-- pairrot:{finding.fingerprint} -->\n"
+        f"{level}"
         f"**[{finding.severity.value} {label}]** {title}\n\n"
         f"条件：{finding.trigger.strip()}\n\n"
         f"结果：{consequence}\n\n"
@@ -111,11 +113,68 @@ def _one_line(finding: Finding, note: str) -> str:
     return f"- [{finding.severity.value} {label}] `{location}` {_public_title(finding)}{suffix}"
 
 
+def _check_line(report: RunReport) -> str:
+    if report.fail_check:
+        return "失败：存在必须处理的意见"
+    if report.fail_on_must_fix:
+        return "通过：没有必须处理的意见"
+    return "不因意见失败"
+
+
+def _plan_leveled(
+    report: RunReport,
+    diff_lines: dict[str, set[int]],
+    posted: set[str],
+) -> Publication:
+    inline: list[InlineComment] = []
+    must_lines: list[str] = []
+    recommend_lines: list[str] = []
+    pending_human: list[str] = []
+    confirmed = sorted(report.confirmed, key=lambda item: _SEVERITY_ORDER[item.severity])
+    for finding in confirmed:
+        if finding.fingerprint in posted:
+            continue
+        path = norm_path(finding.location.file)
+        line = _anchor(finding, diff_lines.get(path, set()))
+        if finding.level == "must_fix":
+            if line is None:
+                must_lines.append(_one_line(finding, "不在本次 diff 的可评论行上"))
+            else:
+                inline.append(
+                    InlineComment(
+                        path=path,
+                        line=line,
+                        body=_comment_body(finding),
+                        fingerprint=finding.fingerprint,
+                    )
+                )
+                must_lines.append(_one_line(finding, ""))
+            continue
+        recommend_lines.append(_one_line(finding, ""))
+    for finding in report.summary.s1_undecided_pending_human:
+        pending_human.append(_one_line(finding, "待人工确认"))
+    seen_pending = {item.fingerprint for item in report.summary.s1_undecided_pending_human}
+    for finding in report.undecided:
+        if finding.fingerprint in seen_pending:
+            continue
+        pending_human.append(_one_line(finding, "未判定"))
+    return _publication(
+        report,
+        inline,
+        must="\n".join(must_lines) or "- 无",
+        recommend="\n".join(recommend_lines) or "- 无",
+        pending="\n".join(pending_human) or "- 无",
+        leveled=True,
+    )
+
+
 def plan_publication(
     report: RunReport,
     diff_lines: dict[str, set[int]],
     posted: set[str],
 ) -> Publication:
+    if report.policy_source == "base":
+        return _plan_leveled(report, diff_lines, posted)
     inline: list[InlineComment] = []
     summary_only: list[str] = []
     pending_human: list[str] = []
@@ -153,14 +212,36 @@ def plan_publication(
             continue
         pending_human.append(_one_line(finding, "未判定"))
 
+    extra = "\n".join(summary_only) or "- 无"
+    pending = "\n".join(pending_human) or "- 无"
+    return _publication(report, inline, extra=extra, pending=pending, leveled=False)
+
+
+def _publication(
+    report: RunReport,
+    inline: list[InlineComment],
+    *,
+    extra: str = "- 无",
+    must: str = "- 无",
+    recommend: str = "- 无",
+    pending: str,
+    leveled: bool,
+) -> Publication:
     reviewed = "\n".join(f"- `{item.path}`" for item in report.reviewed) or "- 无"
     unreviewed = "\n".join(
         f"- `{item.path}`：{item.reason}" for item in report.unreviewed
     ) or "- 无"
-    extra = "\n".join(summary_only) or "- 无"
-    pending = "\n".join(pending_human) or "- 无"
     reasons = "、".join(report.partial_reasons) if report.partial_reasons else "无"
     error = report.error or "无"
+    if leveled:
+        findings_block = (
+            f"规则：{report.policy_note or '无'}\n\n"
+            f"检查：{_check_line(report)}\n\n"
+            f"### 必须处理\n{must}\n\n"
+            f"### 建议\n{recommend}\n\n"
+        )
+    else:
+        findings_block = f"### 未挂到行内的意见\n{extra}\n\n"
     summary = (
         f"{SUMMARY_MARKER}\n"
         f"## pairrot 评审\n\n"
@@ -172,7 +253,7 @@ def plan_publication(
         f"需求：{report.coverage.ticket}\n\n"
         f"CI：{report.coverage.ci}\n\n"
         f"驳回 {len(report.rejected)} 条，不展示在意见里。\n\n"
-        f"### 未挂到行内的意见\n{extra}\n\n"
+        f"{findings_block}"
         f"### 未判定\n{pending}\n\n"
         f"partial 原因：{reasons}\n\n"
         f"错误：{error}\n\n"
