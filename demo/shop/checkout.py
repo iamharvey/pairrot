@@ -1,40 +1,62 @@
-"""结账。每个函数的说明是约定，实现里有故意放进去的错误。"""
+"""Checkout: price the cart, reserve stock, charge, and record the order."""
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime, timezone
+from typing import Callable
 
-def parse_qty(raw: str) -> int:
-    """把十进制数量转成整数。非法文本不是数量。"""
-    try:
-        return int(raw)
-    except Exception:
-        return 0
-
-
-def line_total(price: int, raw_qty: str) -> int:
-    """单价乘解析后的数量。非法文本不能变成一行免费商品。"""
-    return price * parse_qty(raw_qty)
+from demo.shop.inventory import StockLedger
+from demo.shop.orders_repo import OrderRepository, OrderRow
+from demo.shop.payments import GatewayClient, GatewayError, PaymentDeclined
+from demo.shop.pricing import Coupon, Line, quote
 
 
-def refund_remaining(paid: int, refund: int) -> int:
-    """返回尚未退回的金额。退款大于实付时留下 0，不能变成负数。"""
-    return paid - refund
+class CheckoutError(Exception):
+    pass
 
 
-def charge(amount: int, gateway) -> bool:
-    """向网关扣款。网关报错是扣款失败，不是成功。"""
-    try:
-        gateway.charge(amount)
-        return True
-    except Exception:
-        return True
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-def coupon_active(today: int, expires: int) -> bool:
-    """到期当天仍可使用，次日失效。日期是 yyyymmdd 整数。"""
-    return today < expires
+class CheckoutService:
+    def __init__(
+        self,
+        ledger: StockLedger,
+        gateway: GatewayClient,
+        orders: OrderRepository,
+        clock: Callable[[], datetime] = _utc_now,
+    ) -> None:
+        self.ledger = ledger
+        self.gateway = gateway
+        self.orders = orders
+        self.clock = clock
 
+    def place_order(self, customer: str, lines: list[Line], coupon: Coupon | None = None) -> OrderRow:
+        """Reserve stock, charge the customer, and record the order.
 
-def amount_due(subtotal: int, paid: int) -> int:
-    """返回还要付的金额。多付时应付是 0，不是负数。"""
-    return subtotal - paid
+        A cart may list the same sku on several lines. If the charge does not go
+        through, the stock is released and no paid order is recorded.
+        """
+        if not lines:
+            raise CheckoutError("empty cart")
+        now = self.clock()
+        priced = quote(lines, coupon, now.date())
+        wanted: dict[str, int] = {}
+        for line in lines:
+            wanted[line.sku] = line.qty
+        self.ledger.reserve_all(wanted)
+        order_id = uuid.uuid4().hex
+        status = "paid"
+        try:
+            self.gateway.charge(order_id, priced.total)
+        except PaymentDeclined as exc:
+            for sku, qty in wanted.items():
+                self.ledger.release(sku, qty)
+            raise CheckoutError("payment declined") from exc
+        except GatewayError:
+            pass
+        row = OrderRow(order_id, customer, priced.total, status, now.isoformat())
+        self.orders.insert(row)
+        return row

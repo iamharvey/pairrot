@@ -1,47 +1,44 @@
-"""库存。每个函数的说明是约定，实现里有故意放进去的错误。"""
+"""Stock ledger shared by checkout workers running in threads."""
 
 from __future__ import annotations
 
-
-def allocate(stock: int, requests: list[int]) -> list[int]:
-    """每个请求要么整单满足，要么不给。库存刚好等于请求时也要满足。"""
-    granted: list[int] = []
-    remaining = stock
-    for request in requests:
-        if remaining > request:
-            remaining -= request
-            granted.append(request)
-        else:
-            granted.append(0)
-    return granted
+import threading
 
 
-def merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """合并闭区间。重叠或首尾相接的区间并成一个。空输入得到空列表。"""
-    ordered = sorted(ranges)
-    merged = [ordered[0]]
-    for start, end in ordered[1:]:
-        last_start, last_end = merged[-1]
-        if start <= last_end:
-            merged[-1] = (last_start, max(last_end, end))
-        else:
-            merged.append((start, end))
-    return merged
+class OutOfStock(Exception):
+    pass
 
 
-def covers(ranges: list[tuple[int, int]], point: int) -> bool:
-    """点落在某个闭区间上时为真，包含两端。"""
-    for start, end in ranges:
-        if start <= point < end:
-            return True
-    return False
+class StockLedger:
+    def __init__(self, levels: dict[str, int]) -> None:
+        self._levels = dict(levels)
+        self._lock = threading.Lock()
 
+    def available(self, sku: str) -> int:
+        with self._lock:
+            return self._levels.get(sku, 0)
 
-def reserve(stock: dict[str, int], sku: str, qty: int) -> bool:
-    """库存至少有 qty 时扣减并返回真。失败时库存保持原样。"""
-    current = stock.get(sku, 0)
-    if current > qty:
-        stock[sku] = current - qty
-        return True
-    stock[sku] = current - qty
-    return False
+    def reserve(self, sku: str, qty: int) -> None:
+        """Take qty units.
+
+        Raises OutOfStock and leaves the level unchanged when fewer than qty remain.
+        A level equal to qty is enough.
+        """
+        if qty <= 0:
+            raise ValueError("qty must be positive")
+        if self.available(sku) > qty:
+            with self._lock:
+                self._levels[sku] -= qty
+            return
+        raise OutOfStock(sku)
+
+    def release(self, sku: str, qty: int) -> None:
+        if qty <= 0:
+            raise ValueError("qty must be positive")
+        with self._lock:
+            self._levels[sku] = self._levels.get(sku, 0) + qty
+
+    def reserve_all(self, wanted: dict[str, int]) -> None:
+        """Reserve every sku or none of them."""
+        for sku, qty in wanted.items():
+            self.reserve(sku, qty)

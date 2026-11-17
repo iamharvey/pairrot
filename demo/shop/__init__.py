@@ -1,1 +1,1 @@
-"""一个给评审看的小商店。函数说明是对的，实现是故意错的。"""
+"""A small order service: pricing, stock, payments, storage, refunds, and reports."""

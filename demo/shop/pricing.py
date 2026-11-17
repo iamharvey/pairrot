@@ -1,34 +1,86 @@
-"""价格计算。每个函数的说明是约定，实现里有故意放进去的错误。"""
+"""Cart pricing: subtotal, coupon, shipping, and tax."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date
 
-def total_cents(prices: list[int]) -> int:
-    """把每个价格相加。空列表的合计是 0。"""
-    total = 0
-    for index, _price in enumerate(prices):
-        total += prices[index + 1]
-    return total
+from demo.shop.money import clamp, tax_cents
 
-
-def apply_percent_off(price: int, percent: int) -> int:
-    """按百分比减价。1000 打九折是 900，percent 为 10 表示减去 10%。"""
-    return price - percent
+TAX_RATE = 0.13
+FREE_SHIPPING_FROM = 9900
+SHIPPING_FEE = 800
+MAX_QTY_PER_LINE = 99
 
 
-def in_band(value: int, low: int, high: int) -> bool:
-    """value 落在闭区间内时为真，包含两端。"""
-    return low <= value < high
+@dataclass(frozen=True)
+class Line:
+    sku: str
+    unit_cents: int
+    qty: int
 
 
-def split_evenly(total: int, parts: int) -> list[int]:
-    """把 total 分成 parts 份。各份相加必须等于 total。parts 至少为 1。"""
-    share = total // parts
-    return [share] * parts
+@dataclass(frozen=True)
+class Coupon:
+    code: str
+    percent_off: int
+    max_off_cents: int
+    expires: date
 
 
-def clamp(value: int, low: int, high: int) -> int:
-    """把 value 收进闭区间。上下界写反时先换回来。"""
-    if low > high:
-        low, high = high, low
-    return min(max(value, low), high)
+@dataclass(frozen=True)
+class Quote:
+    subtotal: int
+    discount: int
+    shipping: int
+    tax: int
+
+    @property
+    def total(self) -> int:
+        return self.subtotal - self.discount + self.shipping + self.tax
+
+
+def parse_qty(raw: str) -> int:
+    """Parse a quantity typed by the customer.
+
+    Text that is not an integer raises ValueError. Integers outside 1..MAX_QTY_PER_LINE
+    are pulled back into that range.
+    """
+    try:
+        qty = int(raw)
+    except ValueError:
+        return 0
+    return clamp(qty, 1, MAX_QTY_PER_LINE)
+
+
+def subtotal(lines: list[Line]) -> int:
+    return sum(line.unit_cents * line.qty for line in lines)
+
+
+def coupon_valid(coupon: Coupon, today: date) -> bool:
+    """A coupon can be used through the end of its expiry date."""
+    return today < coupon.expires
+
+
+def discount_for(coupon: Coupon | None, amount: int, today: date) -> int:
+    """Percent off amount, never more than the coupon's cap."""
+    if coupon is None or not coupon_valid(coupon, today):
+        return 0
+    off = amount * coupon.percent_off // 100
+    return max(off, coupon.max_off_cents)
+
+
+def shipping_for(amount: int) -> int:
+    return 0 if amount >= FREE_SHIPPING_FROM else SHIPPING_FEE
+
+
+def quote(lines: list[Line], coupon: Coupon | None, today: date) -> Quote:
+    gross = subtotal(lines)
+    discount = discount_for(coupon, gross, today)
+    net = gross - discount
+    return Quote(
+        subtotal=gross,
+        discount=discount,
+        shipping=shipping_for(net),
+        tax=tax_cents(net, TAX_RATE),
+    )
