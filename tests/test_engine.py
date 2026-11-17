@@ -7,17 +7,18 @@ from pathlib import Path
 
 import httpx
 
-from pairrot.budget import Clock
+from pairrot.budget import BudgetTracker, Clock
 from pairrot.llm import ChatMessage, Completion, FakeModel, OpenAICompatibleClient, ToolCall
 from pairrot.models import (
     OUT_OF_WHITELIST_LABEL,
     Budget,
     Category,
+    RunStatus,
     fingerprint,
     nearest_symbol,
     normalize_snippet,
 )
-from pairrot.pipeline import review_change
+from pairrot.pipeline import _decide_status, review_change
 from pairrot.redact import strip_secrets
 from pairrot.review import REVIEW_SYSTEM_PROMPT, validate_candidate
 from pairrot.snapshot import take_snapshot
@@ -246,6 +247,13 @@ def test_wall_clock_keeps_completed_verification(tmp_path: Path):
     assert [item.trigger for item in report.undecided] == ["LATER"]
     assert [item.trigger for item in report.summary.s1_undecided_pending_human] == ["LATER"]
     assert report.confirmed == []
+
+
+def test_missing_model_fails_even_when_the_diff_is_partial():
+    tracker = BudgetTracker(Budget())
+    tracker.error = "缺少模型环境变量"
+    status = _decide_status(tracker=tracker, snapshot_partial=True, finding_count=0)
+    assert status == RunStatus.failed
 
 
 def test_tool_call_cap_is_per_perspective_and_defaults():
@@ -525,7 +533,7 @@ def test_size_threshold_partial_and_skips(tmp_path: Path):
     over_snapshot = take_snapshot(line_repo, exact, over)
     assert over_snapshot.partial
     assert over_snapshot.reviewed == []
-    assert over_snapshot.unreviewed[0].reason == "超过行数阈值（2000）"
+    assert over_snapshot.unreviewed[0].reason == "行数预算已满（2000），此文件未审"
     quiet = _scripted({"findings": [_finding(file="big.py")]}, {"verdict": "confirmed", "reason": "x", "checked": []})
     over_report = review_change(line_repo, exact, over, tmp_path / "out-lines", llm=quiet)
     assert over_report.status.value == "partial"

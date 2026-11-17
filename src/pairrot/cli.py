@@ -21,9 +21,13 @@ def _budget_from_env(cost_cap: float | None) -> Budget:
     per = float(os.environ.get("PAIRROT_COST_PER_1K_TOKENS") or 0)
     wall = int(os.environ.get("PAIRROT_WALL_CLOCK_SECONDS") or 600)
     tools = int(os.environ.get("PAIRROT_MAX_TOOL_CALLS") or 30)
+    files = int(os.environ.get("PAIRROT_MAX_FILES") or 40)
+    lines = int(os.environ.get("PAIRROT_MAX_CHANGED_LINES") or 2000)
     return Budget(
         max_tool_calls_per_perspective=tools,
         wall_clock_seconds=wall,
+        max_files=files,
+        max_changed_lines=lines,
         cost_cap=cap,
         cost_per_1k_tokens=per,
     )

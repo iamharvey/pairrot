@@ -33,6 +33,8 @@ jobs:
         continue-on-error: true
         env:
           PAIRROT_DISABLE_DOTENV: "1"
+          PAIRROT_MAX_FILES: "80"
+          PAIRROT_MAX_CHANGED_LINES: "12000"
           PAIRROT_BASE_URL: ${{ secrets.PAIRROT_BASE_URL }}
           PAIRROT_API_KEY: ${{ secrets.PAIRROT_API_KEY }}
           PAIRROT_MODEL: ${{ secrets.PAIRROT_MODEL }}
