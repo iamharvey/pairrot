@@ -1,0 +1,65 @@
+name: pairrot review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pairrot-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pairrot
+        run: pip install .
+
+      - name: Review the pull request
+        id: review
+        continue-on-error: true
+        env:
+          PAIRROT_DISABLE_DOTENV: "1"
+          PAIRROT_MAX_FILES: "80"
+          PAIRROT_MAX_CHANGED_LINES: "12000"
+          PAIRROT_BASE_URL: ${{ secrets.PAIRROT_BASE_URL }}
+          PAIRROT_API_KEY: ${{ secrets.PAIRROT_API_KEY }}
+          PAIRROT_MODEL: ${{ secrets.PAIRROT_MODEL }}
+          PAIRROT_VERIFIER_MODEL: ${{ secrets.PAIRROT_VERIFIER_MODEL }}
+        run: >
+          pairrot review
+          --repo .
+          --base ${{ github.event.pull_request.base.sha }}
+          --head ${{ github.event.pull_request.head.sha }}
+          --out pairrot-out
+
+      - name: Publish review comments
+        id: publish
+        if: always()
+        env:
+          PAIRROT_DISABLE_DOTENV: "1"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: >
+          pairrot publish github
+          --report pairrot-out/report.json
+          --pr ${{ github.event.pull_request.number }}
+
+      - name: Fail the check when review or publish failed
+        if: always()
+        run: |
+          test "${{ steps.review.outcome }}" = "success"
+          test "${{ steps.publish.outcome }}" = "success"
