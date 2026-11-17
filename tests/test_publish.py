@@ -94,7 +94,8 @@ def test_inline_budget_skips_posted_s3_and_lines_outside_the_diff():
     assert "s3" not in posted_inline
     assert "off" not in posted_inline
     assert "already" not in posted_inline
-    assert "S3 只进摘要" in planned.summary
+    assert "S3 只进摘要" not in planned.summary
+    assert "trigger s3" in planned.summary
     assert "不在本次 diff 的可评论行上" in planned.summary
     assert "超出行内预算" in planned.summary
     assert "<!-- pairrot-summary -->" in planned.summary
@@ -127,8 +128,14 @@ def test_publish_creates_review_and_updates_existing_summary(tmp_path: Path):
     assert review["comments"][0]["path"] == "src/app.py"
     assert review["comments"][0]["line"] == 4
     assert review["comments"][0]["side"] == "RIGHT"
-    assert "<!-- pairrot:new -->" in review["comments"][0]["body"]
-    assert "secret-token" not in review["comments"][0]["body"]
+    body = review["comments"][0]["body"]
+    assert "<!-- pairrot:new -->" in body
+    assert "条件：" in body
+    assert "结果：" in body
+    assert "建议：" in body
+    assert "已验证" not in body
+    assert "成立" not in body
+    assert "secret-token" not in body
     update = next(body for method, path, body in calls if method == "PATCH")
     assert update is not None
     assert "<!-- pairrot-summary -->" in update["body"]

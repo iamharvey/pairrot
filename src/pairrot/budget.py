@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Callable
 
@@ -30,33 +31,46 @@ class BudgetTracker:
         self.reasons: list[str] = []
         self.error: str | None = None
         self.produced = False
+        self._lock = threading.RLock()
+
+    def set_error(self, message: str) -> None:
+        with self._lock:
+            if not self.error:
+                self.error = message
 
     def mark(self, reason: str) -> None:
-        self.exhausted = True
-        if reason not in self.reasons:
-            self.reasons.append(reason)
+        with self._lock:
+            self.exhausted = True
+            if reason not in self.reasons:
+                self.reasons.append(reason)
 
     def allow_model_call(self) -> bool:
-        if "费用达到上限" in self.reasons:
-            return False
-        if self.clock.elapsed() >= self.budget.wall_clock_seconds:
-            self.mark("墙钟达到上限")
-            return False
-        return True
+        with self._lock:
+            if "费用达到上限" in self.reasons:
+                return False
+            if self.clock.elapsed() >= self.budget.wall_clock_seconds:
+                self.exhausted = True
+                if "墙钟达到上限" not in self.reasons:
+                    self.reasons.append("墙钟达到上限")
+                return False
+            return True
 
     def add_completion(self, completion: Completion) -> bool:
         """Record usage from a call that already happened. False means stop."""
-        self.produced = True
-        self.tokens.prompt_tokens += completion.prompt_tokens
-        self.tokens.completion_tokens += completion.completion_tokens
-        self.tokens.total = self.tokens.prompt_tokens + self.tokens.completion_tokens
-        if completion.cost:
-            self.cost += completion.cost
-        else:
-            used = completion.prompt_tokens + completion.completion_tokens
-            self.cost += used / 1000 * self.budget.cost_per_1k_tokens
-        cap = self.budget.cost_cap
-        if cap is not None and self.cost >= cap:
-            self.mark("费用达到上限")
-            return False
-        return True
+        with self._lock:
+            self.produced = True
+            self.tokens.prompt_tokens += completion.prompt_tokens
+            self.tokens.completion_tokens += completion.completion_tokens
+            self.tokens.total = self.tokens.prompt_tokens + self.tokens.completion_tokens
+            if completion.cost:
+                self.cost += completion.cost
+            else:
+                used = completion.prompt_tokens + completion.completion_tokens
+                self.cost += used / 1000 * self.budget.cost_per_1k_tokens
+            cap = self.budget.cost_cap
+            if cap is not None and self.cost >= cap:
+                self.exhausted = True
+                if "费用达到上限" not in self.reasons:
+                    self.reasons.append("费用达到上限")
+                return False
+            return True
