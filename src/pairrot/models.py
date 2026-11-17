@@ -152,6 +152,7 @@ class Finding(BaseModel):
     introduced_in: IntroducedIn = IntroducedIn.unknown
     snippet: str = ""
     symbol: str = "unknown"
+    level: str = ""
 
 
 class LineRange(BaseModel):
@@ -245,6 +246,10 @@ class RunReport(BaseModel):
     dropped: list[DroppedCandidate] = Field(default_factory=list)
     error: str | None = None
     reused: bool = False
+    policy_source: str = "default"
+    policy_note: str = ""
+    fail_on_must_fix: bool = False
+    fail_check: bool = False
 
 
 _SYMBOL_PATTERNS: tuple[re.Pattern[str], ...] = (

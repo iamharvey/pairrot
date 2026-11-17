@@ -18,7 +18,9 @@ from pairrot.models import (
     Verdict,
     dump_model,
 )
-from pairrot.review import PROMPT_VERSION, load_sources, review_diff
+from pairrot.policy import Policy, load_policy
+from pairrot.review import PROMPT_VERSION, load_sources, prompt_for, review_diff
+from pairrot.secrets_scan import scan_added_secrets
 from pairrot.snapshot import GitError, merge_base, resolve_sha, take_snapshot
 from pairrot.tools import RepoTools
 from pairrot.verify import mark_undecided, verify_findings
@@ -32,6 +34,7 @@ def reuse_key(
     budget: Budget,
     reviewer_model: str | None,
     verifier_model: str | None,
+    policy_key: str = "default",
 ) -> str:
     payload = {
         "base": base_sha,
@@ -40,6 +43,7 @@ def reuse_key(
         "budget": dump_model(budget),
         "reviewer_model": reviewer_model,
         "verifier_model": verifier_model,
+        "policy": policy_key,
     }
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
@@ -148,6 +152,15 @@ def _empty_report(
     )
 
 
+def _apply_levels(findings: list[Finding], policy: Policy) -> list[Finding]:
+    if not policy.active:
+        return findings
+    return [
+        finding.model_copy(update={"level": policy.level_for(finding.category)})
+        for finding in findings
+    ]
+
+
 def review_change(
     repo: Path | str,
     base: str,
@@ -191,6 +204,7 @@ def review_change(
         return report
 
     verifier_name = verifier_model or reviewer_model
+    policy = load_policy(root, base_sha)
     key = reuse_key(
         base_sha=base_sha,
         head_sha=head_sha,
@@ -198,7 +212,23 @@ def review_change(
         budget=budget,
         reviewer_model=reviewer_model,
         verifier_model=verifier_name,
+        policy_key=policy.digest(),
     )
+    if policy.error:
+        report = _empty_report(
+            status=RunStatus.failed,
+            base_sha=base_sha,
+            head_sha=head_sha,
+            budget=budget,
+            key=key,
+            reviewer_model=reviewer_model,
+            verifier_model=verifier_name,
+            coverage=coverage,
+            error=policy.error,
+            elapsed=round(active_clock.elapsed(), 3),
+        )
+        _write_report(report, destination)
+        return report
     if reuse:
         existing = _load_reusable(destination, key)
         if existing is not None:
@@ -235,7 +265,7 @@ def review_change(
     tracker = BudgetTracker(budget, active_clock)
     findings: list[Finding] = []
     dropped = []
-    if snapshot.reviewed:
+    if snapshot.reviewed and policy.needs_model():
         if llm is None:
             try:
                 llm = client_from_env()
@@ -261,6 +291,8 @@ def review_change(
                 model=reviewer_model,
                 tool_host=review_tools,
                 sources=sources,
+                prompt=prompt_for(policy),
+                allowed=policy.llm_categories() if policy.active else None,
             )
             if findings and tracker.allow_model_call():
                 findings = verify_findings(
@@ -276,6 +308,10 @@ def review_change(
             elif findings:
                 reason = tracker.reasons[-1] if tracker.reasons else "预算用尽，未完成验证"
                 findings = [mark_undecided(finding, reason) for finding in findings]
+
+    if policy.active and policy.secrets_enabled and snapshot.reviewed:
+        findings = scan_added_secrets(root, snapshot) + findings
+    findings = _apply_levels(findings, policy)
 
     confirmed = []
     rejected = []
@@ -324,6 +360,14 @@ def review_change(
         dropped=dropped,
         error=tracker.error,
         reused=False,
+        policy_source=policy.source if policy.active else "default",
+        policy_note=policy.note(),
+        fail_on_must_fix=policy.fail_on_must_fix if policy.active else False,
+        fail_check=bool(
+            policy.active
+            and policy.fail_on_must_fix
+            and any(item.level == "must_fix" for item in confirmed)
+        ),
     )
     _write_report(report, destination)
     return report

@@ -26,6 +26,24 @@ _BARE_ASSIGN = re.compile(
 )
 
 
+def secret_name(text: str | None) -> str | None:
+    """Return an assignment or token label when the line looks like a secret."""
+    if not text or not text.strip():
+        return None
+    quoted = _QUOTED_ASSIGN.search(text)
+    if quoted:
+        return quoted.group(1).lower()
+    bare = _BARE_ASSIGN.search(text)
+    if bare:
+        return bare.group(1).lower()
+    if _PRIVATE_KEY.search(text):
+        return "private_key"
+    for pattern in _PREFIXES:
+        if pattern.search(text):
+            return "token"
+    return None
+
+
 def strip_secrets(text: str | None) -> str:
     if not text:
         return ""

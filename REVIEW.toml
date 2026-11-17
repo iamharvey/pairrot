@@ -1,0 +1,21 @@
+# Read from the base commit. A pull request cannot change these rules for itself.
+# must_fix comments are posted inline. recommend comments stay in the summary.
+# fail_on_must_fix = true makes the check fail when a confirmed must_fix remains.
+
+fail_on_must_fix = false
+
+[correctness]
+enabled = true
+level = "must_fix"
+
+[secrets]
+enabled = true
+level = "must_fix"
+
+[performance]
+enabled = false
+level = "recommend"
+
+# [[extra]]
+# enabled = false
+# instruction = "如果新增的外部调用没有超时，报 error_handling，并写明哪个调用会一直挂住。"
