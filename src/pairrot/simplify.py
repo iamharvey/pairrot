@@ -7,6 +7,7 @@ import re
 import sys
 import tomllib
 from pathlib import Path
+from typing import Callable
 
 from pairrot.complexity_budget import references
 from pairrot.context import block_end, defined_name, enclosing
@@ -191,15 +192,21 @@ def gate_simplifications(
     repo: Path,
     head_sha: str,
     sources: dict[str, str],
+    stop: Callable[[], bool] | None = None,
 ) -> tuple[list[Finding], list[DroppedCandidate]]:
-    """Drop extension points, reject new dependencies, and record which tests lock the behavior."""
+    """Drop extension points, reject new dependencies, and record which tests lock the behavior.
+
+    Findings left when stop returns True pass through ungated. The verifier is out of time too, so they end undecided.
+    """
     if not any(finding.category == Category.complexity for finding in findings):
+        return findings, []
+    if stop is not None and stop():
         return findings, []
     declared = declared_modules(repo, head_sha)
     kept: list[Finding] = []
     dropped: list[DroppedCandidate] = []
     for finding in findings:
-        if finding.category != Category.complexity:
+        if finding.category != Category.complexity or (stop is not None and stop()):
             kept.append(finding)
             continue
         if matches(finding.location.file, policy.extension_points):

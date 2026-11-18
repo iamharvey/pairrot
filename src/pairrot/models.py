@@ -22,7 +22,7 @@ class Category(str, Enum):
     complexity = "complexity"
 
 
-# Correctness perspective only. Other whitelist categories are dropped in phase 1.
+# The categories reviewed when the base has no REVIEW.toml.
 CORRECTNESS_CATEGORIES = frozenset({Category.logic_error, Category.error_handling})
 
 CATEGORY_FROM_LABEL: dict[str, Category] = {
@@ -238,6 +238,7 @@ class ComplexityStats(BaseModel):
     single_use: list[str] = Field(default_factory=list)
     new_env_reads: int = 0
     exceeded: list[str] = Field(default_factory=list)
+    complete: bool = True
 
 
 class RunReport(BaseModel):

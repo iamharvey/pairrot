@@ -13,6 +13,7 @@ from pairrot.models import (
     Budget,
     Category,
     Finding,
+    norm_path,
 )
 from pairrot.pipeline import review_change
 from pairrot.snapshot import GitError, run_git
@@ -20,10 +21,11 @@ from pairrot.snapshot import GitError, run_git
 _RANGE = re.compile(r"(\d+)\s*[-~～–—]\s*(\d+)")
 
 NOTE = (
-    "阶段 1 只开正确性视角（logic_error、error_handling）。"
-    "业务、并发、契约等类别召回偏低是预期。"
+    "召回只覆盖评审时打开的视角，没打开的类别召回偏低是预期。"
     "请按类别看召回，不要用总召回代替。"
     "总召回低于旧工具时，先看是不是类别没覆盖。"
+    "数据集 B 的命中要求同类别的确认意见落在修复提交改过的文件里；"
+    "修复提交缺失时退回只比类别，这类命中另计在 category_only_hits。"
 )
 
 
@@ -45,8 +47,6 @@ def _overlaps(finding: Finding, spans: list[tuple[int, int]]) -> bool:
 
 
 def _same_file(finding: Finding, path: str) -> bool:
-    from pairrot.models import norm_path
-
     return norm_path(finding.location.file) == norm_path(path)
 
 
@@ -123,6 +123,23 @@ def _parent(repo: Path, rev: str) -> str | None:
     return text or None
 
 
+def _fix_files(repo: Path, fix: str | None) -> set[str] | None:
+    """Files the fix commit changed. The defect lives there. None when the fix is not in the clone."""
+    if not fix or not _commit_exists(repo, fix):
+        return None
+    shown = run_git(repo, "show", "--name-only", "--format=", fix)
+    if shown.returncode != 0:
+        return None
+    return {norm_path(path) for path in shown.stdout.splitlines() if path.strip()}
+
+
+def _b_match(findings: list[Finding], category_key: str | None, fix_files: set[str] | None) -> tuple[bool, str]:
+    same = [finding for finding in findings if finding.category.value == category_key]
+    if fix_files is None:
+        return bool(same), "category_only"
+    return any(norm_path(finding.location.file) in fix_files for finding in same), "fix_files"
+
+
 def _bucket(category_label: str | None, category_key: str | None) -> str:
     if (category_label or "").strip() == OUT_OF_WHITELIST_LABEL:
         return "out_of_whitelist"
@@ -140,6 +157,7 @@ def _empty_scores() -> dict[str, dict]:
 def _blank_score() -> dict:
     return {
         "recall_hits": 0,
+        "category_only_hits": 0,
         "recall_total": 0,
         "recall": None,
         "false_positives": 0,
@@ -403,16 +421,19 @@ def _replay_b(dataset_dir, repos_root, out_dir, scores, llm, budget, reviewer_mo
             bucket = _bucket(row.get("category"), row.get("category_key"))
             score = _score_for(scores, bucket)
             _bump_old_tool(score, row.get("old_tool_flag"))
-            hit = any(finding.category.value == row.get("category_key") for finding in report.confirmed)
+            hit, match = _b_match(report.confirmed, row.get("category_key"), _fix_files(repo, row.get("fix_commit")))
             if hit:
                 hits += 1
                 score["recall_hits"] += 1
+                if match == "category_only":
+                    score["category_only_hits"] += 1
             score["recall_total"] += 1
             items.append(
                 _b_item(
                     row,
                     gap=None,
                     hit=hit,
+                    match=match,
                     findings=report.confirmed,
                     base_sha=report.base_sha,
                     head_sha=report.head_sha,
@@ -447,6 +468,7 @@ def _b_item(
     gap: str | None,
     hit: bool,
     findings: list[Finding],
+    match: str | None = None,
     base_sha: str | None = None,
     head_sha: str | None = None,
 ) -> dict:
@@ -465,6 +487,7 @@ def _b_item(
         "old_tool_flag": row.get("old_tool_flag"),
         "old_tool_summary": row.get("old_tool_summary"),
         "hit": hit,
+        "match": match,
         "gap": gap,
         "confirmed_findings": [_brief(finding) for finding in findings],
     }

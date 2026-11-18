@@ -58,7 +58,7 @@ def _completion(payload: dict, **usage) -> Completion:
 
 
 def _scripted(review, verify) -> FakeModel:
-    def handler(messages, tools, model):
+    def handler(messages, model):
         system = messages[0].content or ""
         producer = verify if "独立验证" in system else review
         result = producer(messages) if callable(producer) else producer
@@ -289,8 +289,7 @@ def test_lookup_followup_keeps_a_bounded_pack_and_stops_at_the_cap(tmp_path: Pat
     repo, base, tip = _changed_repo(tmp_path)
     seen: dict[str, str] = {}
 
-    def handler(messages, tools, model):
-        assert tools is None
+    def handler(messages, model):
         system = messages[0].content or ""
         user = messages[-1].content or ""
         if "独立验证" in system:
@@ -335,11 +334,10 @@ def test_lookup_followup_keeps_a_bounded_pack_and_stops_at_the_cap(tmp_path: Pat
     assert '"source": "lookup"' in followup
     assert "未执行" in followup
     assert len(followup) < 32_000
-    assert all(call["tools"] is None for call in model.calls)
 
 
 def _lookup_handler(followup: dict, first: list[dict]):
-    def handler(messages, tools, model):
+    def handler(messages, model):
         system = messages[0].content or ""
         user = messages[-1].content or ""
         if "独立验证" in system:
@@ -431,7 +429,7 @@ def test_lookup_does_not_block_verification(tmp_path: Path):
     repo, base, tip = _changed_repo(tmp_path)
     seen: dict[str, str] = {}
 
-    def handler(messages, tools, model):
+    def handler(messages, model):
         system = messages[0].content or ""
         user = messages[-1].content or ""
         if "独立验证" in system:
@@ -468,7 +466,6 @@ def test_lookup_does_not_block_verification(tmp_path: Path):
     assert '"source": "caller"' in verify
     assert f'"rev": "{tip}"' in verify
     assert "search_code add" in verify
-    assert all(call["tools"] is None for call in model.calls)
 
 
 def test_cost_cap_stops_before_verify(tmp_path: Path):
@@ -534,32 +531,26 @@ def test_tools_are_readonly_and_local(tmp_path: Path):
     write(repo, "app.py", "HEADONLY = 1\n")
     write(repo, "tests/test_app.py", "def test_app():\n    assert True\n")
     tip = commit(repo, "change")
-    tools = RepoTools(repo, base, tip, ticket_path=None, ci_path=None, max_calls=10)
+    tools = RepoTools(repo, base, tip, max_calls=10)
     assert "只能是 base 或 head" in tools.execute(
         "read_file", {"path": "app.py", "rev": "HEAD", "start_line": 1, "end_line": 2}
     )
     assert tools.execute("search_code", {"pattern": "BASEONLY"}) == "无匹配"
     assert "HEADONLY" in tools.execute("search_code", {"pattern": "HEADONLY"})
     assert "tests/test_app.py" in tools.execute("list_tests", {"path": "app.py"})
-    assert tools.execute("get_ci_results", {}) == "无 CI 结果"
-    assert tools.execute("get_ticket", {}) == "未关联需求，未做业务意图核对"
-    ci = tmp_path / "ci.json"
-    ticket = tmp_path / "ticket.txt"
-    ci.write_text('{"conclusion":"green"}', encoding="utf-8")
-    ticket.write_text("需求正文", encoding="utf-8")
-    local = RepoTools(repo, base, tip, ticket_path=ticket, ci_path=ci, max_calls=10)
-    assert "green" in local.execute("get_ci_results", {})
-    assert "需求正文" in local.execute("get_ticket", {})
-    missing = RepoTools(
-        repo,
-        base,
-        tip,
-        ticket_path=tmp_path / "absent.txt",
-        ci_path=tmp_path / "absent.json",
-        max_calls=5,
-    )
-    assert missing.execute("get_ci_results", {}) == "无 CI 结果"
-    assert missing.execute("get_ticket", {}) == "未关联需求，未做业务意图核对"
+    assert tools.execute("git_log", {}) == "未知工具"
+
+
+def test_a_cached_lookup_costs_no_call(tmp_path: Path):
+    repo, base, tip = _changed_repo(tmp_path)
+    cache: dict[str, str] = {}
+    first = RepoTools(repo, base, tip, max_calls=1, cache=cache)
+    assert "return a - b" in first.execute("search_code", {"pattern": "return"})
+    second = RepoTools(repo, base, tip, max_calls=1, cache=cache)
+    assert "return a - b" in second.execute("search_code", {"pattern": "return"})
+    assert second.calls == 0
+    assert "def add" in second.execute("search_code", {"pattern": "def add"})
+    assert second.try_execute("search_code", {"pattern": "a - b"}) is None
 
 
 def test_evidence_pack_names_source_and_rev_and_stays_within_the_cap():
@@ -657,15 +648,12 @@ def test_openai_client_posts_chat_completions_without_a_live_call():
         "fake-model",
         transport=httpx.MockTransport(handler),
     )
-    completion = client.complete(
-        [ChatMessage(role="user", content="hello")],
-        tools=[{"type": "function", "function": {"name": "read_file", "parameters": {}}}],
-        model="override-model",
-    )
+    completion = client.complete([ChatMessage(role="user", content="hello")], model="override-model")
     assert captured["url"] == "https://example.test/v1/chat/completions"
     assert captured["auth"] == "Bearer test-key"
     assert captured["body"]["model"] == "override-model"
-    assert captured["body"]["tools"][0]["function"]["name"] == "read_file"
+    assert captured["body"]["messages"] == [{"role": "user", "content": "hello"}]
+    assert "tools" not in captured["body"]
     assert completion.prompt_tokens == 3
     assert completion.completion_tokens == 4
     assert completion.message.content == "{\"findings\": []}"
@@ -809,7 +797,7 @@ def test_large_diff_is_sliced_without_tools(tmp_path: Path):
         write(repo, name, "".join(f"v{index}\n" for index in range(6000)))
     tip = commit(repo, "big")
     base = git_parent(repo)
-    model = FakeModel(lambda messages, tools, model: _completion({"findings": []}))
+    model = FakeModel(lambda messages, model: _completion({"findings": []}))
     report = review_change(
         repo,
         base,
@@ -821,7 +809,6 @@ def test_large_diff_is_sliced_without_tools(tmp_path: Path):
     assert report.status.value == "passed"
     users = [call["messages"][1].content for call in model.calls]
     assert len(users) >= 3
-    assert all(call["tools"] is None for call in model.calls)
     assert not any(all(f"FILE {name}" in text for name in ("a.py", "b.py", "c.py")) for text in users)
     blob = "\n".join(users)
     assert "FILE a.py" in blob and "FILE b.py" in blob and "FILE c.py" in blob
@@ -843,4 +830,3 @@ def test_verifier_rewrites_an_overstated_consequence(tmp_path: Path):
     assert report.confirmed[0].consequence == "还会匹配到其他文件"
     assert report.confirmed[0].verification.reason == "文件本身仍能匹配"
     assert report.confirmed[0].title == "路径被当成通配符"
-    assert all(call["tools"] is None for call in model.calls)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Callable
 
 from pairrot.context import defined_name
 from pairrot.models import ComplexityStats, norm_path
@@ -67,14 +68,19 @@ def changed_rows(repo: Path, snapshot: Snapshot, path: str) -> tuple[list[str], 
     return _changed_rows(file_diff(repo, snapshot.base_sha, snapshot.head_sha, path, context=0))
 
 
-def complexity_stats(repo: Path, snapshot: Snapshot) -> ComplexityStats:
+def complexity_stats(repo: Path, snapshot: Snapshot, *, stop: Callable[[], bool] | None = None) -> ComplexityStats:
+    """Once stop returns True the counts are lower bounds and complete is False. A limit they already exceed still holds."""
     net = 0
     new_files: list[str] = []
     defined: list[str] = []
     removed_names: set[str] = set()
     env_added = 0
     env_removed = 0
+    complete = True
     for span in snapshot.reviewed:
+        if stop is not None and stop():
+            complete = False
+            break
         path = norm_path(span.path)
         if looks_like_test(path):
             continue
@@ -93,13 +99,20 @@ def complexity_stats(repo: Path, snapshot: Snapshot) -> ComplexityStats:
         env_added += sum(1 for row in added if _ENV_READ.search(row))
         env_removed += sum(1 for row in removed if _ENV_READ.search(row))
     symbols = [name for name in defined if name not in removed_names]
-    single = [name for name in symbols[:MAX_SYMBOLS] if len(references(repo, snapshot.head_sha, name)) <= 1]
+    single: list[str] = []
+    for name in symbols[:MAX_SYMBOLS]:
+        if stop is not None and stop():
+            complete = False
+            break
+        if len(references(repo, snapshot.head_sha, name)) <= 1:
+            single.append(name)
     return ComplexityStats(
         net_added=net,
         new_files=new_files,
         new_symbols=symbols,
         single_use=single,
         new_env_reads=max(0, env_added - env_removed),
+        complete=complete,
     )
 
 

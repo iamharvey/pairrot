@@ -1,4 +1,4 @@
-"""Pin two commits and list the change set that phase 1 will actually review."""
+"""Pin two commits and list the change set that will actually be reviewed."""
 
 from __future__ import annotations
 

@@ -18,7 +18,7 @@ from pairrot.context import (
     numbered,
 )
 from pairrot.evidence import EvidencePiece, render_pack
-from pairrot.facts import facts_for
+from pairrot.facts import facts_for, is_complete
 from pairrot.llm import ChatMessage, LLM
 from pairrot.models import Category, Finding, IntroducedIn, Verdict, Verification, norm_path
 from pairrot.policy import Policy
@@ -205,7 +205,7 @@ def _pieces(
         )
     related = facts_for(facts, path) if finding.category in DESIGN_CATEGORIES else ""
     if related:
-        pieces.append(EvidencePiece(source="facts", rev=head_sha, ref=path, text=related))
+        pieces.append(EvidencePiece(source="facts", rev=head_sha, ref=path, text=related, complete=is_complete(related)))
     return [*pieces, *lookups]
 
 
@@ -282,7 +282,7 @@ def verify_findings(
             ChatMessage(role="user", content=user),
         ]
         try:
-            completion = llm.complete(messages, None, model=model)
+            completion = llm.complete(messages, model=model)
         except Exception as exc:
             tracker.set_error(str(exc))
             stopped.set()
