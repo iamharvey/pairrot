@@ -1,0 +1,28 @@
+{
+  "demo": "feature/ledger-demo base c6fd907 head 7c21800",
+  "model": "deepseek-v4-flash for every tool",
+  "scoring": "line overlap with benchmark/ledger_answer_key.jsonl, then checked by hand; one comment naming several defects counts for each it names",
+  "notes": [
+    "LED-C06 is not a clean decoy: hmac.compare_digest raises TypeError on a non-ASCII str signature, so OCR's comment there is correct",
+    "pairrot counts only confirmed findings; undecided and rejected were 0 in every round"
+  ],
+  "runs": {
+    "ocr": {
+      "L1": {"defects": 29, "in_scope": 15, "comments": 37, "decoy_fp": 0, "tokens": 672993, "secs": 170},
+      "L2": {"defects": 29, "in_scope": 15, "comments": 31, "decoy_fp": 0, "tokens": 279989, "secs": 270},
+      "L3": {"defects": 28, "in_scope": 15, "comments": 30, "decoy_fp": 0, "tokens": 138108, "secs": 119, "missed": ["LED-D07"]}
+    },
+    "pr_agent": {
+      "L1": {"defects": 8, "in_scope": 2, "decoy_fp": 0, "tokens": 39136, "secs": 85},
+      "L2": {"defects": 7, "in_scope": 2, "decoy_fp": 0, "tokens": 50016, "secs": 145},
+      "L3": {"defects": 8, "in_scope": 2, "decoy_fp": 0, "tokens": 43730, "secs": 122}
+    },
+    "pairrot": {
+      "L1": {"defects": 18, "in_scope": 14, "decoy_fp": 0, "tokens": 66487, "secs": 135, "missed_in_scope": ["LED-D13"]},
+      "L2": {"defects": 18, "in_scope": 14, "decoy_fp": 0, "tokens": 77367, "secs": 145, "missed_in_scope": ["LED-D13"]},
+      "L3": {"defects": 18, "in_scope": 14, "decoy_fp": 0, "tokens": 84095, "secs": 143, "missed_in_scope": ["LED-D15"]},
+      "always_missed": ["LED-D01", "LED-D02", "LED-D03", "LED-D04", "LED-D05", "LED-D06", "LED-D07", "LED-D08", "LED-D10", "LED-D29"],
+      "out_of_scope_caught": ["LED-D09", "LED-D11", "LED-D12", "LED-D26"]
+    }
+  }
+}

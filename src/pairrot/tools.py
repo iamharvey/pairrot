@@ -120,7 +120,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
 ]
 
 
-def _looks_like_test(path: str) -> bool:
+def looks_like_test(path: str) -> bool:
     name = Path(path).name.lower()
     parts = path.lower().replace("\\", "/").split("/")
     if any(part in {"test", "tests", "__tests__", "spec", "specs"} for part in parts):
@@ -331,7 +331,7 @@ class RepoTools:
         stem = Path(safe).stem.lower()
         found = []
         for line in completed.stdout.splitlines():
-            if stem and stem in line.lower() and _looks_like_test(line):
+            if stem and stem in line.lower() and looks_like_test(line):
                 found.append(line)
         if not found:
             return "未找到相关测试文件"

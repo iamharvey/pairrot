@@ -1,0 +1,32 @@
+{
+  "demo": "feature/ledger-demo base c6fd907 head aae6439 (signature_ok decoy fixed); benchmark copies 1f977fc..fbe81b0 add a base REVIEW.toml with security and performance on",
+  "model": "deepseek-v4-flash for every tool",
+  "scoring": "exact line overlap first, then slack 2; also-locations for LED-D03 and LED-D20; checked by hand",
+  "runs": {
+    "ocr": {
+      "M1": {"defects": 29, "comments": 39, "tokens": 619689, "secs": 133},
+      "M2": {"defects": 29, "comments": 37, "tokens": 618019, "secs": 253},
+      "M3": {"defects": 28, "comments": 33, "tokens": 432621, "secs": 140, "missed": ["LED-D03"]}
+    },
+    "pr_agent": {
+      "M1": {"defects": 8, "tokens": 47657, "secs": 125},
+      "M2": {"defects": 7, "tokens": 55016, "secs": 161},
+      "M3": {"defects": 7, "tokens": 50962, "secs": 135}
+    },
+    "pairrot_v7_security_performance": {
+      "M1": {"confirmed_defects": 25, "undecided": 3, "rejected": 1, "tokens": 106889, "secs": 175},
+      "M2": {"confirmed_defects": 23, "undecided": 6, "tokens": 137355, "secs": 206, "note": "reviewer line numbers drifted; verifier saw truncated functions"},
+      "M3": {"confirmed_defects": 26, "undecided": 2, "tokens": 108110, "secs": 178}
+    },
+    "pairrot_v8_relocate_module_docstring": {
+      "N1": {"confirmed_defects": 26, "tokens": 98428, "secs": 153},
+      "N2": {"status": "partial", "confirmed_defects": 0, "undecided": 28, "note": "one capped lookup marked every finding in the slice undecided"},
+      "N3": {"confirmed_defects": 28, "tokens": 99673, "secs": 188}
+    },
+    "pairrot_v9_per_finding_lookup_hold": {
+      "P1": {"confirmed_defects": 29, "extra_comments": 0, "tokens": 110331, "secs": 217, "missed": []},
+      "P2": {"confirmed_defects": 26, "extra_comments": 0, "tokens": 126741, "secs": 185, "missed": ["LED-D07", "LED-D11", "LED-D15"]},
+      "P3": {"confirmed_defects": 27, "extra_comments": 0, "tokens": 103546, "secs": 171, "missed": ["LED-D07", "LED-D10"], "rejected": ["LED-D10 only test callers"]}
+    }
+  }
+}

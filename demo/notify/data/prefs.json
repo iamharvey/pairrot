@@ -1,0 +1,7 @@
+[
+  {"user": "u1", "prefs_v1": "email,sms"},
+  {"user": "u2", "prefs_v1": "email"},
+  {"user": "u3", "prefs_v1": "sms"},
+  {"user": "u4", "channels": ["email"]},
+  {"user": "u5", "channels": ["sms", "email"]}
+]

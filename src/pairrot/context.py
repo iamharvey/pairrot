@@ -31,7 +31,7 @@ _NOT_CALLEES = frozenset(
 )
 
 
-def _defined_name(line: str) -> str | None:
+def defined_name(line: str) -> str | None:
     for pattern in _SYMBOL_PATTERNS:
         match = pattern.match(line)
         if match:
@@ -69,7 +69,7 @@ def block_end(lines: list[str], start: int, cap: int = FUNCTION_LINES * 3) -> in
 def enclosing(lines: list[str], start: int, end: int) -> tuple[int, int] | None:
     """1-based range of the innermost definition that contains start..end."""
     for number in range(min(start, len(lines)), 0, -1):
-        if _defined_name(lines[number - 1]) is None:
+        if defined_name(lines[number - 1]) is None:
             continue
         last = block_end(lines, number)
         if last >= end:
@@ -79,7 +79,7 @@ def enclosing(lines: list[str], start: int, end: int) -> tuple[int, int] | None:
 
 def enclosing_name(lines: list[str], start: int, end: int) -> str | None:
     span = enclosing(lines, start, end)
-    return _defined_name(lines[span[0] - 1]) if span else None
+    return defined_name(lines[span[0] - 1]) if span else None
 
 
 def numbered(lines: list[str], first: int, last: int) -> str:
@@ -206,7 +206,7 @@ def callees(
     for number in range(first, last + 1):
         for match in _CALL.finditer(lines[number - 1]):
             name = next(group for group in match.groups() if group)
-            if name in _NOT_CALLEES or _defined_name(lines[number - 1]) == name:
+            if name in _NOT_CALLEES or defined_name(lines[number - 1]) == name:
                 continue
             distance = 0 if start <= number <= end else min(abs(number - start), abs(number - end))
             calls[name] = min(distance, calls.get(name, distance))
@@ -227,7 +227,7 @@ def _find_definition(name: str, sources: dict[str, str]) -> tuple[str, int, int,
     for path in sorted(sources):
         rows = sources[path].splitlines()
         for number, text in enumerate(rows, start=1):
-            if _defined_name(text) == name:
+            if defined_name(text) == name:
                 last = min(block_end(rows, number), number + CALLEE_LINES - 1)
                 return path, number, last, numbered(rows, number, last)
     return None
@@ -249,7 +249,7 @@ def callers(repo: Path, head_sha: str, symbol: str, cache: dict[str, list[str]])
         if len(parts) < 4:
             continue
         _, path, line_no, text = parts
-        if _defined_name(text) == symbol or not re.search(rf"\b{re.escape(symbol)}\s*\(", text):
+        if defined_name(text) == symbol or not re.search(rf"\b{re.escape(symbol)}\s*\(", text):
             continue
         total += 1
         if len(sites) >= MAX_CALLERS:

@@ -1,0 +1,24 @@
+{
+  "sample": "demo/shop PR #5, base 82fe32e, head 237f52f, deepseek-v4-flash",
+  "pairrot": "phase1-correctness-v6: verifier pack = enclosing function, diff rows trimmed to it, callees, head-wide callers; pack limit 12000",
+  "scored_by": "agent against benchmark/shop_answer_key.jsonl",
+  "rounds": [
+    {"files": "pairrot_v6a", "secs": 130, "tokens": 74224,
+     "confirmed": ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D18", "D20", "D21"],
+     "undecided": [], "rejected": [], "missed": ["D09", "D17", "D19"], "decoy_hits": []},
+    {"files": "pairrot_v6b", "secs": 80, "tokens": 55367,
+     "confirmed": ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08", "D10", "D12", "D13", "D14", "D15", "D16", "D18", "D20", "D21"],
+     "undecided": [], "rejected": [], "missed": ["D09", "D11", "D17", "D19"], "decoy_hits": []},
+    {"files": "pairrot_v6c", "secs": 150, "tokens": 72640,
+     "confirmed": ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D18", "D20", "D21"],
+     "undecided": [], "rejected": [], "missed": ["D09", "D17", "D19"], "decoy_hits": []}
+  ],
+  "verifier_false_candidate_check": {
+    "script": "/tmp/pairrot-bench/verify_decoys.py",
+    "candidates": "6 deliberately false claims on clean code C01-C06",
+    "rounds": 2,
+    "rejected": 12,
+    "confirmed": 0,
+    "undecided": 0
+  }
+}

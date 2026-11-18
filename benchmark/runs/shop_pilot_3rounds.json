@@ -1,0 +1,24 @@
+{
+  "sample": "demo/shop PR #5, base 82fe32e, head 237f52f, deepseek-v4-flash for all tools, default configs",
+  "scored_by": "agent against benchmark/shop_answer_key.jsonl; not yet human-judged",
+  "answer_key_issue": "D06 (inventory.py:29 `>`) already exists in base reserve(); it is not introduced by this PR",
+  "rounds": {
+    "open-code-review": [
+      {"files": "ocr_run1.json", "hit": 20, "in_scope": 14, "missed": ["D20"], "decoy_hits": ["C07", "C08"], "tokens": 511958},
+      {"files": "ocr_r2.json", "hit": 20, "in_scope": 14, "missed": ["D20"], "decoy_hits": ["C07", "C08"], "tokens": 477730},
+      {"files": "ocr_r3.json", "hit": 21, "in_scope": 15, "missed": [], "decoy_hits": ["C07", "C08"], "tokens": 597426}
+    ],
+    "pr-agent": [
+      {"files": "pragent_run1_*", "hit": 9, "in_scope": 6, "set": ["D10", "D11", "D13", "D14", "D15", "D18", "D19", "D20", "D21"], "decoy_hits": [], "tokens": 50599},
+      {"files": "pragent_r2_*", "hit": 7, "in_scope": 4, "set": ["D10", "D11", "D14", "D18", "D19", "D20", "D21"], "decoy_hits": [], "tokens": 42160},
+      {"files": "pragent_r3_*", "hit": 9, "in_scope": 6, "set": ["D05", "D10", "D11", "D13", "D14", "D18", "D19", "D20", "D21"], "decoy_hits": [], "tokens": 41552}
+    ],
+    "pairrot": [
+      {"files": "pairrot_run2", "confirmed": 14, "confirmed_in_scope": 12, "undecided": ["D08", "D16", "D18"], "decoy_hits": [], "tokens": 82118},
+      {"files": "pairrot_r2", "confirmed": 2, "confirmed_in_scope": 2, "undecided": [], "decoy_hits": [], "tokens": 28628,
+       "note": "follow-up call returned [] and replaced all first-pass findings; reproduced in pairrot_trace1 (14 -> 0)"},
+      {"files": "pairrot_r3", "confirmed": 12, "confirmed_in_scope": 10, "undecided": ["D05", "D08", "D11", "D14", "D18"], "rejected": ["D06 as pre-existing"], "decoy_hits": [], "tokens": 76615}
+    ]
+  },
+  "raw_outputs": "/tmp/pairrot-bench/out"
+}

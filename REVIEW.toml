@@ -1,8 +1,9 @@
 # Read from the base commit. A pull request cannot change these rules for itself.
 # must_fix comments are posted inline. recommend comments stay in the summary.
 # fail_on_must_fix = true makes the check fail when a confirmed must_fix remains.
+# A maintainer can pass one head anyway with the pairrot-override label. New commits remove the label.
 
-fail_on_must_fix = false
+fail_on_must_fix = true
 
 [correctness]
 enabled = true
@@ -19,6 +20,28 @@ level = "must_fix"
 [performance]
 enabled = true
 level = "recommend"
+
+# Breaking changes are intentional by default. Only paths in stable are reviewed as outside contracts.
+# allow_break lifts a stable path for the change that lands it on the base first.
+[compatibility]
+enabled = true
+stable = []
+allow_break = []
+
+# Simplifications must name the replacement and argue it keeps behavior and performance.
+# Only findings whose code is mentioned by a test get this level. The rest stay recommend.
+[simplicity]
+enabled = true
+level = "must_fix"
+extension_points = []
+
+# Counted from git without a model. Any limit that is set fails the check when exceeded.
+# [complexity_budget]
+# max_net_added = 800
+# max_new_files = 10
+# max_new_symbols = 40
+# max_single_use = 10
+# max_new_env_reads = 3
 
 # [[extra]]
 # enabled = false

@@ -1,0 +1,44 @@
+{
+  "sample": "demo/shop PR #5",
+  "base": "82fe32ed4ff049ed490b4d864383329fb45dfaaf",
+  "head": "237f52f5680abb1c6cb81740b8ae1b7b3bdbbc65",
+  "model": "deepseek-v4-flash (DeepSeek API, same key for all tools)",
+  "scored_by": "agent against benchmark/shop_answer_key.jsonl; not yet human-judged",
+  "tools": {
+    "open-code-review": {
+      "version": "1.13.10",
+      "config": "defaults; --format json; isolated HOME",
+      "elapsed_seconds": 541,
+      "total_tokens": 511958,
+      "comments": 23,
+      "hit": ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08", "D09", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D21"],
+      "missed": ["D20"],
+      "decoy_hits": ["C07", "C08"],
+      "unkeyed": ["payments.py:61 unguarded response KeyError", "checkout.py:60-62 no rollback if insert fails after charge"]
+    },
+    "pr-agent": {
+      "version": "0.50.0",
+      "config": "defaults; local git provider; review + improve; reasoning_effort=medium added by PR-Agent",
+      "elapsed_seconds": 187,
+      "total_tokens": 50599,
+      "comments": "3 key issues + 3 security concerns + 3 suggestions",
+      "hit": ["D10", "D11", "D13", "D14", "D15", "D18", "D19", "D20", "D21"],
+      "missed": ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08", "D09", "D12", "D16", "D17"],
+      "decoy_hits": [],
+      "unkeyed": []
+    },
+    "pairrot": {
+      "version": "phase1-correctness-v4 @ 237f52f",
+      "config": "defaults; REVIEW.toml from base",
+      "elapsed_seconds": 338,
+      "total_tokens": 82118,
+      "comments": 17,
+      "confirmed": ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D10", "D12", "D13", "D14", "D15", "D20", "D21"],
+      "undecided": ["D08", "D16", "D18"],
+      "missed": ["D09", "D11", "D17", "D19"],
+      "decoy_hits": [],
+      "unkeyed": []
+    }
+  },
+  "discarded": "pairrot run 1: ran concurrently with OCR on the same key, hit ReadTimeout, status=partial"
+}

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from pairrot.budget import BudgetTracker, Clock
+from pairrot.complexity_budget import complexity_stats, over_budget
+from pairrot.facts import design_facts
 from pairrot.llm import LLM, ModelError, client_from_env
 from pairrot.models import (
     Budget,
@@ -21,9 +24,13 @@ from pairrot.models import (
 from pairrot.policy import Policy, load_policy
 from pairrot.review import PROMPT_VERSION, load_sources, prompt_for, review_diff
 from pairrot.secrets_scan import scan_added_secrets
+from pairrot.simplify import gate_simplifications
 from pairrot.snapshot import GitError, merge_base, resolve_sha, take_snapshot
 from pairrot.tools import RepoTools
 from pairrot.verify import mark_undecided, verify_findings
+
+
+FACTS_LIMIT = 6000
 
 
 def reuse_key(
@@ -162,10 +169,27 @@ def _apply_levels(findings: list[Finding], policy: Policy) -> list[Finding]:
         return findings
     return [
         finding.model_copy(
-            update={"level": policy.level_for(finding.category, secret=_is_secret(finding))}
+            update={
+                "level": policy.level_for(
+                    finding.category,
+                    secret=_is_secret(finding),
+                    locked=bool(finding.locked_by) and finding.replacement is not None,
+                )
+            }
         )
         for finding in findings
     ]
+
+
+def _fail_reasons(policy: Policy, confirmed: list[Finding], exceeded: list[str]) -> list[str]:
+    if not policy.active:
+        return []
+    reasons: list[str] = []
+    if policy.fail_on_must_fix and any(item.level == "must_fix" for item in confirmed):
+        reasons.append("存在必须处理的意见")
+    if exceeded:
+        reasons.append("复杂度预算超限：" + "；".join(exceeded))
+    return reasons
 
 
 def _is_secret(finding: Finding) -> bool:
@@ -294,17 +318,55 @@ def review_change(
                 max_calls=budget.max_tool_calls_per_perspective,
                 cache=evidence_cache,
             )
-            findings, dropped, diffs, packs = review_diff(
-                llm=llm,
+            passes = [(prompt_for(policy), policy.main_categories() if policy.active else None, "")]
+            facts = ""
+            if policy.active:
+                if not policy.main_categories():
+                    passes = []
+                if policy.design_categories():
+                    facts = design_facts(root, snapshot, sources)[:FACTS_LIMIT]
+                    passes.append((prompt_for(policy, design=True), policy.design_categories(), facts))
+
+            def run_pass(index: int):
+                prompt, allowed, facts = passes[index]
+                tools = review_tools if index == 0 else RepoTools(
+                    root,
+                    snapshot.base_sha,
+                    snapshot.head_sha,
+                    ticket_path=ticket_path,
+                    ci_path=ci_path,
+                    max_calls=budget.max_tool_calls_per_perspective,
+                    cache=evidence_cache,
+                )
+                return review_diff(
+                    llm=llm,
+                    repo=root,
+                    snapshot=snapshot,
+                    tracker=tracker,
+                    model=reviewer_model,
+                    tool_host=tools,
+                    sources=sources,
+                    prompt=prompt,
+                    allowed=allowed,
+                    facts=facts,
+                )
+
+            with ThreadPoolExecutor(max_workers=max(1, len(passes))) as pool:
+                results = list(pool.map(run_pass, range(len(passes))))
+            findings, dropped, diffs, packs = [], [], {}, {}
+            for found, lost, pass_diffs, pass_packs in results:
+                findings += found
+                dropped += lost
+                diffs = pass_diffs
+                packs.update(pass_packs)
+            findings, gated = gate_simplifications(
+                findings,
+                policy=policy,
                 repo=root,
-                snapshot=snapshot,
-                tracker=tracker,
-                model=reviewer_model,
-                tool_host=review_tools,
+                head_sha=snapshot.head_sha,
                 sources=sources,
-                prompt=prompt_for(policy),
-                allowed=policy.llm_categories() if policy.active else None,
             )
+            dropped = dropped + gated
             pending = [finding for finding in findings if finding.verification is None]
             held = [finding for finding in findings if finding.verification is not None]
             if pending and tracker.allow_model_call():
@@ -319,6 +381,8 @@ def review_change(
                     base_sha=snapshot.base_sha,
                     head_sha=snapshot.head_sha,
                     repo=Path(repo),
+                    policy=policy if policy.active else None,
+                    facts=facts,
                 )
             elif pending:
                 reason = tracker.reasons[-1] if tracker.reasons else "预算用尽，未完成验证"
@@ -342,6 +406,11 @@ def review_change(
             rejected.append(finding)
         else:
             undecided.append(finding)
+
+    stats = complexity_stats(root, snapshot) if policy.active and snapshot.reviewed else None
+    if stats is not None:
+        stats.exceeded = over_budget(stats, policy)
+    fail_reasons = _fail_reasons(policy, confirmed, stats.exceeded if stats else [])
 
     reasons = list(snapshot.partial_reasons)
     for reason in tracker.reasons:
@@ -379,11 +448,9 @@ def review_change(
         policy_source=policy.source if policy.active else "default",
         policy_note=policy.note(),
         fail_on_must_fix=policy.fail_on_must_fix if policy.active else False,
-        fail_check=bool(
-            policy.active
-            and policy.fail_on_must_fix
-            and any(item.level == "must_fix" for item in confirmed)
-        ),
+        fail_check=bool(fail_reasons),
+        fail_reasons=fail_reasons,
+        complexity=stats,
     )
     _write_report(report, destination)
     return report
