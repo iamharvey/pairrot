@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="pairrot-logo-copyright.svg" alt="pairrot" width="100%">
+  <img src="pairrot-logo-copyright.png" alt="pairrot" width="100%">
 </p>
 
 # pairrot
