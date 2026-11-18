@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
 
 from pairrot.eval_import import import_audit
 from pairrot.eval_replay import replay
+from pairrot.export import to_markdown, to_sonar
 from pairrot.models import Budget
 from pairrot.pipeline import review_change
-from pairrot.publish_github import publish_from_env
+from pairrot.publish_github import load_report, publish_from_env
 
 
 def _budget_from_env(cost_cap: float | None) -> Budget:
@@ -95,6 +97,17 @@ def _cmd_publish(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_export(args: argparse.Namespace) -> int:
+    report = load_report(args.report)
+    if args.format == "sonar":
+        text = json.dumps(to_sonar(report), ensure_ascii=False, indent=2) + "\n"
+    else:
+        text = to_markdown(report) + "\n"
+    Path(args.out).write_text(text, encoding="utf-8")
+    print(f"{args.format}={args.out} confirmed={len(report.confirmed)}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pairrot")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -134,6 +147,12 @@ def build_parser() -> argparse.ArgumentParser:
     github.add_argument("--repository", default=None, help="Defaults to GITHUB_REPOSITORY")
     github.add_argument("--token", default=None, help="Defaults to GITHUB_TOKEN")
     github.set_defaults(func=_cmd_publish)
+
+    export = sub.add_parser("export", help="Render a report as Markdown or SonarQube external issues")
+    export.add_argument("format", choices=["markdown", "sonar"])
+    export.add_argument("--report", required=True)
+    export.add_argument("--out", required=True)
+    export.set_defaults(func=_cmd_export)
     return parser
 
 
