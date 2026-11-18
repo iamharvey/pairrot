@@ -366,6 +366,10 @@ level = "must_fix"               # must_fix：挂到行内；recommend：只进�
 enabled = true
 level = "must_fix"
 
+[security]                       # 打开后模型也报安全问题：注入、越权、敏感数据进日志、非恒定时间比较等
+enabled = true                   # 需写明攻击者可控的输入和利用路径；硬编码密钥仍归 [secrets]
+level = "must_fix"
+
 [performance]                    # 打开后模型也报性能问题（需写明输入规模和后果）
 enabled = true
 level = "recommend"

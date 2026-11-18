@@ -32,7 +32,7 @@ from pairrot.policy import Policy
 from pairrot.snapshot import Snapshot, file_diff, run_git
 from pairrot.tools import RepoTools
 
-PROMPT_VERSION = "phase1-correctness-v6"
+PROMPT_VERSION = "phase1-correctness-v7"
 _SLICE_CHARS = 32_000
 _PARALLEL = 4
 _LOOKUP_TOOLS = {"read_file", "search_code", "find_references", "list_tests"}
@@ -87,6 +87,12 @@ def prompt_for(policy: Policy) -> str:
     ]
     if policy.performance_enabled:
         lines.append("性能问题必须写明输入规模和可以观察到的后果。说不出规模或后果就不要输出。")
+    if policy.security_enabled:
+        lines.append(
+            "security 只报能说出利用路径的问题：攻击者能控制的输入从哪里进来（以函数文档或调用方为准）、"
+            "到达哪个操作、造成什么后果，例如拼接 SQL、缺少归属校验、敏感数据写进日志、用 == 比较令牌或签名。"
+            "不报加固建议，不报硬编码密钥（另有确定性规则）。"
+        )
     for instruction in policy.extras:
         lines.append(instruction)
     return "\n".join(lines)

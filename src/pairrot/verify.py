@@ -30,6 +30,8 @@ rev 是版本。complete 为 false 表示这条证据被截断或没有取到。
 核对四点：路径是否真的能发生、代码或调用方是否已经挡住、缺陷是否这次变更引入、后果有没有说大。
 caller 检索完整但没有调用方时，按函数自己的文档、签名和实现判断：公开函数违反自己写明的约定就算可达，不要只因没有调用方判 undecided。
 只有判断所依赖的证据缺失或 complete 为 false 时，verdict 才是 undecided。
+security 候选还要核对：输入是否真的来自外部（看函数文档和调用方），中途有没有参数化、白名单、归属校验或脱敏挡住。
+performance 候选还要核对：写明的输入规模在文档或调用方里有依据，循环或查询次数确实随规模增长。
 
 只返回 JSON：
 {"verdict":"confirmed","reason":"一句话","introduced_in":"this_change","consequence":"","checked":["path_reachable","existing_protection","introduced_in_this_change","consequence_exaggerated"]}

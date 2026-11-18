@@ -28,6 +28,8 @@ class Policy:
     secrets_level: str = "must_fix"
     performance_enabled: bool = False
     performance_level: str = "recommend"
+    security_enabled: bool = False
+    security_level: str = "must_fix"
     extras: tuple[str, ...] = ()
     error: str | None = None
 
@@ -41,6 +43,8 @@ class Policy:
             found.update(CORRECTNESS_CATEGORIES)
         if self.active and self.performance_enabled:
             found.add(Category.performance)
+        if self.active and self.security_enabled:
+            found.add(Category.security)
         return frozenset(found)
 
     def needs_model(self) -> bool:
@@ -48,9 +52,11 @@ class Policy:
             return True
         return bool(self.llm_categories())
 
-    def level_for(self, category: Category) -> str:
-        if category == Category.security:
+    def level_for(self, category: Category, *, secret: bool = False) -> str:
+        if secret:
             return self.secrets_level
+        if category == Category.security:
+            return self.security_level
         if category == Category.performance:
             return self.performance_level
         if category in CORRECTNESS_CATEGORIES:
@@ -64,6 +70,7 @@ class Policy:
             f"correctness={'开启' if self.correctness_enabled else '关闭'}:{self.correctness_level}",
             f"secrets={'开启' if self.secrets_enabled else '关闭'}:{self.secrets_level}",
             f"performance={'开启' if self.performance_enabled else '关闭'}:{self.performance_level}",
+            f"security={'开启' if self.security_enabled else '关闭'}:{self.security_level}",
         ]
         if self.extras:
             parts.append(f"extra={len(self.extras)}")
@@ -84,6 +91,8 @@ class Policy:
                     "secrets_level": self.secrets_level,
                     "performance_enabled": self.performance_enabled,
                     "performance_level": self.performance_level,
+                    "security_enabled": self.security_enabled,
+                    "security_level": self.security_level,
                     "extras": list(self.extras),
                 },
                 sort_keys=True,
@@ -132,6 +141,7 @@ def policy_from_toml(text: str) -> Policy:
     correctness = _table(data, "correctness")
     secrets = _table(data, "secrets")
     performance = _table(data, "performance")
+    security = _table(data, "security")
     extras_raw = data.get("extra", [])
     if extras_raw is None:
         extras_raw = []
@@ -156,6 +166,8 @@ def policy_from_toml(text: str) -> Policy:
         secrets_level=_level(secrets.get("level"), default="must_fix"),
         performance_enabled=_enabled(performance, False),
         performance_level=_level(performance.get("level"), default="recommend"),
+        security_enabled=_enabled(security, False),
+        security_level=_level(security.get("level"), default="must_fix"),
         extras=tuple(extras),
     )
 

@@ -176,6 +176,53 @@ instruction = "PROBE_RULE"
     assert "模型自己报的密钥" not in planned.summary
 
 
+def test_security_perspective_has_its_own_level_apart_from_secrets(tmp_path: Path):
+    toml = """
+[secrets]
+enabled = true
+level = "recommend"
+
+[security]
+enabled = true
+level = "must_fix"
+"""
+    head = "def find(conn, name):\n    return conn.execute(f\"SELECT * FROM t WHERE name = '{name}'\")\n" + _SECRET
+    repo, base, tip = _repo(tmp_path, toml, head, toml_on_base=True)
+
+    def handler(messages, tools, model):
+        system = messages[0].content or ""
+        if "独立验证" in system:
+            assert "参数化" in system
+            return _completion(
+                {"verdict": "confirmed", "reason": "name 来自请求", "checked": ["path_reachable"], "introduced_in": "this_change"}
+            )
+        assert "security" in system and "利用路径" in system
+        return _completion(
+            {
+                "findings": [
+                    {
+                        "category": "security",
+                        "severity": "S1",
+                        "file": "app.py",
+                        "start_line": 2,
+                        "end_line": 2,
+                        "title": "name 拼进 SQL",
+                        "trigger": "name = \"x' OR '1'='1\"",
+                        "consequence": "返回整张表",
+                        "suggestion": "改成参数化查询",
+                        "snippet": "conn.execute",
+                        "introduced_in": "this_change",
+                    }
+                ]
+            }
+        )
+
+    report = review_change(repo, base, tip, tmp_path / "out", llm=FakeModel(handler))
+    levels = {item.title: item.level for item in report.confirmed}
+    assert levels == {"新增了疑似密钥": "recommend", "name 拼进 SQL": "must_fix"}
+    assert "security=开启:must_fix" in report.policy_note
+
+
 def test_broken_policy_fails_the_run(tmp_path: Path):
     repo, base, tip = _repo(tmp_path, "fail_on_must_fix = \n", "x = 1\n", toml_on_base=True)
     report = review_change(repo, base, tip, tmp_path / "out", llm=_quiet())
