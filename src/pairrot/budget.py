@@ -55,6 +55,14 @@ class BudgetTracker:
                 return False
             return True
 
+    def out_of_time(self) -> bool:
+        """For git-only work between model calls. Spending the wall clock there marks the run partial too."""
+        with self._lock:
+            if self.clock.elapsed() < self.budget.wall_clock_seconds:
+                return False
+            self.mark("墙钟达到上限")
+            return True
+
     def add_completion(self, completion: Completion) -> bool:
         """Record usage from a call that already happened. False means stop."""
         with self._lock:

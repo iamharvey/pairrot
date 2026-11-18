@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from pathlib import Path
 
 from pairrot.budget import BudgetTracker, Clock
@@ -14,6 +15,7 @@ from pairrot.llm import LLM, ModelError, client_from_env
 from pairrot.models import (
     Budget,
     Coverage,
+    DroppedCandidate,
     Finding,
     ReportSummary,
     RunReport,
@@ -30,7 +32,14 @@ from pairrot.tools import RepoTools
 from pairrot.verify import mark_undecided, verify_findings
 
 
-FACTS_LIMIT = 6000
+@lru_cache(maxsize=1)
+def engine_digest() -> str:
+    """Hash of pairrot's own source. Gates and rules change without a prompt change, and old reports must not replay."""
+    digest = hashlib.sha256()
+    for path in sorted(Path(__file__).parent.glob("*.py")):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
 
 
 def reuse_key(
@@ -47,6 +56,7 @@ def reuse_key(
         "base": base_sha,
         "head": head_sha,
         "prompt_version": prompt_version,
+        "engine": engine_digest(),
         "budget": dump_model(budget),
         "reviewer_model": reviewer_model,
         "verifier_model": verifier_model,
@@ -192,6 +202,28 @@ def _fail_reasons(policy: Policy, confirmed: list[Finding], exceeded: list[str])
     return reasons
 
 
+def _dedupe(findings: list[Finding]) -> tuple[list[Finding], list[DroppedCandidate]]:
+    """One finding per fingerprint, so a defect seen by two slices costs one verifier call and one comment."""
+    best: dict[str, Finding] = {}
+    dropped: list[DroppedCandidate] = []
+    for finding in findings:
+        kept = best.get(finding.fingerprint)
+        if kept is None:
+            best[finding.fingerprint] = finding
+            continue
+        winner, loser = (finding, kept) if len(finding.evidence) > len(kept.evidence) else (kept, finding)
+        best[finding.fingerprint] = winner
+        dropped.append(
+            DroppedCandidate(
+                reason="duplicate fingerprint",
+                category=loser.category.value,
+                file=loser.location.file,
+                trigger=loser.trigger,
+            )
+        )
+    return list(best.values()), dropped
+
+
 def _is_secret(finding: Finding) -> bool:
     return finding.verification is not None and "secret_pattern" in finding.verification.checked
 
@@ -324,7 +356,7 @@ def review_change(
                 if not policy.main_categories():
                     passes = []
                 if policy.design_categories():
-                    facts = design_facts(root, snapshot, sources)[:FACTS_LIMIT]
+                    facts = design_facts(root, snapshot, sources, stop=tracker.out_of_time)
                     passes.append((prompt_for(policy, design=True), policy.design_categories(), facts))
 
             def run_pass(index: int):
@@ -359,14 +391,16 @@ def review_change(
                 dropped += lost
                 diffs = pass_diffs
                 packs.update(pass_packs)
+            findings, duplicates = _dedupe(findings)
             findings, gated = gate_simplifications(
                 findings,
                 policy=policy,
                 repo=root,
                 head_sha=snapshot.head_sha,
                 sources=sources,
+                stop=tracker.out_of_time,
             )
-            dropped = dropped + gated
+            dropped = dropped + duplicates + gated
             pending = [finding for finding in findings if finding.verification is None]
             held = [finding for finding in findings if finding.verification is not None]
             if pending and tracker.allow_model_call():
@@ -407,7 +441,7 @@ def review_change(
         else:
             undecided.append(finding)
 
-    stats = complexity_stats(root, snapshot) if policy.active and snapshot.reviewed else None
+    stats = complexity_stats(root, snapshot, stop=tracker.out_of_time) if policy.active and snapshot.reviewed else None
     if stats is not None:
         stats.exceeded = over_budget(stats, policy)
     fail_reasons = _fail_reasons(policy, confirmed, stats.exceeded if stats else [])

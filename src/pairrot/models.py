@@ -238,6 +238,7 @@ class ComplexityStats(BaseModel):
     single_use: list[str] = Field(default_factory=list)
     new_env_reads: int = 0
     exceeded: list[str] = Field(default_factory=list)
+    complete: bool = True
 
 
 class RunReport(BaseModel):
