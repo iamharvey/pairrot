@@ -37,7 +37,7 @@ def _completion(payload: dict) -> Completion:
 
 
 def _quiet() -> FakeModel:
-    return FakeModel(lambda messages, tools, model: _completion({"findings": []}))
+    return FakeModel(lambda messages, model: _completion({"findings": []}))
 
 
 def _repo(tmp_path: Path, toml: str | None, head: str, *, toml_on_base: bool) -> tuple[Path, str, str]:
@@ -103,7 +103,7 @@ def test_disabling_correctness_skips_the_model(tmp_path: Path):
     toml = "[correctness]\nenabled = false\n"
     repo, base, tip = _repo(tmp_path, toml, "def clamp(value, low, high):\n    return low\n", toml_on_base=True)
 
-    def handler(messages, tools, model):
+    def handler(messages, model):
         raise AssertionError("model should not be called")
 
     report = review_change(repo, base, tip, tmp_path / "out", llm=FakeModel(handler))
@@ -124,7 +124,7 @@ instruction = "PROBE_RULE"
 """
     repo, base, tip = _repo(tmp_path, toml, "def work(rows):\n    return rows\n", toml_on_base=True)
 
-    def handler(messages, tools, model):
+    def handler(messages, model):
         system = messages[0].content or ""
         if "独立验证" in system:
             return _completion(
@@ -189,7 +189,7 @@ level = "must_fix"
     head = "def find(conn, name):\n    return conn.execute(f\"SELECT * FROM t WHERE name = '{name}'\")\n" + _SECRET
     repo, base, tip = _repo(tmp_path, toml, head, toml_on_base=True)
 
-    def handler(messages, tools, model):
+    def handler(messages, model):
         system = messages[0].content or ""
         if "独立验证" in system:
             assert "参数化" in system

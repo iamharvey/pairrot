@@ -22,19 +22,19 @@ pairrot 是一个 AI 代码评审引擎：读取一次变更（两个固定的 c
 ```mermaid
 flowchart LR
     A[固定 base/head SHA] --> B[快照: merge-base 三点 diff]
-    B --> C[切片评审<br/>最多 4 路并行]
+    B --> C[切片评审<br/>主轮和设计轮并行<br/>每轮最多 4 路]
     C -->|需要时| D[只读查询 + 复判]
     C --> E[独立验证者<br/>最多 4 路并行]
     D --> E
-    B --> S[确定性密钥扫描]
+    B --> S[确定性密钥扫描<br/>打开 secrets 时]
     E --> R[report.json]
     S --> R
     R --> P[发布: GitHub / Markdown / Sonar]
 ```
 
 1. **快照**：评审对象是 `base...head` 的三点 diff（以 merge-base 为起点），两个 SHA 在开始时固定。超过文件数或变更行数阈值的部分不审，并在报告里列为“未审查”，状态记为 `partial`。
-2. **评审**：diff 按 32k 字符切片，每片调用一次模型。模型只能报白名单里的类别（默认 `logic_error` 和 `error_handling`），每条发现必须写明触发条件和后果，说不出触发条件的不收。不合格式的候选会被丢弃并记下原因。
-3. **查询与复判**（按需）：评审模型觉得看不到调用方或保护条件时，可以请求最多 2 次只读查询（`search_code`、`read_file`、`find_references`、`list_tests`）。拿到结果后，同一个模型再判断一次，只能撤回被证据明确否定的发现，撤回会记录在报告里。
+2. **评审**：diff 按 32k 字符切片，每片调用一次模型，每轮最多 4 片并行；打开设计轮时两轮同时跑，最多 8 个评审调用同时进行。模型只能报白名单里的类别（默认 `logic_error` 和 `error_handling`），每条发现必须写明触发条件和后果，说不出触发条件的不收。不合格式的候选会被丢弃并记下原因。
+3. **查询与复判**（按需）：评审模型觉得看不到调用方或保护条件时，可以请求最多 2 次只读查询（`search_code`、`read_file`、`find_references`、`list_tests`），命中缓存的查询不占次数。拿到结果后，同一个模型再判断一次，只能撤回被证据明确否定的发现，撤回会记录在报告里。
 4. **独立验证**：每条候选交给验证者单独复核。验证者看不到评审模型的推理，只看候选本身和一个有大小上限的证据包：
    - `function`：候选所在的整个函数（head 版本）；
    - `diff`：覆盖这个函数的变更行；
@@ -43,7 +43,7 @@ flowchart LR
    - `lookup`：第 3 步查询的结果。
 
    每条证据都带来源、版本和是否完整。验证者核对四点：路径能否发生、是否已有保护、是否本次引入、后果有没有说大。结论只有 `confirmed`、`rejected`、`undecided` 三种，只有 `confirmed` 会发到 PR。
-5. **密钥扫描**：新增行里的疑似密钥由确定性规则识别，不经过模型。报告和评论里只写变量名，值一律显示为 `[REDACTED]`。
+5. **密钥扫描**（base 的 `REVIEW.toml` 打开 `[secrets]` 时）：新增行里的疑似密钥由确定性规则识别，不经过模型。没有规则文件时不扫描。报告和评论里只写变量名，值一律显示为 `[REDACTED]`。
 6. **设计轮与简化门禁**（打开 `[compatibility]` 或 `[simplicity]` 时）：契约和简化单独跑一轮评审，和第 2 步并行。这一轮附带一份用 git 算出的事实：签名变化的函数和它们在 head 的调用点、新增函数和类的引用数、与已有函数实现相同的新函数、新增布尔常量的赋值和读取处。验证者拿到同一份事实里与候选文件相关的条目。简化建议进验证者之前，先用确定性规则过一遍：
    - 落在扩展点上的丢弃；
    - 替换代码引入了项目没声明的依赖的直接驳回；
@@ -502,7 +502,7 @@ instruction = "如果新增的外部调用没有超时，报 error_handling，�
 | 改评审提示词 | `src/pairrot/review.py` 的 `REVIEW_SYSTEM_PROMPT`、`prompt_for` |
 | 改验证者的判断标准 | `src/pairrot/verify.py` 的 `VERIFY_SYSTEM_PROMPT` |
 | 给验证者更多上下文 | `src/pairrot/context.py`（函数、被调、调用方的选取和行数上限），以及 `verify.py` 的 `VERIFY_PACK_LIMIT` |
-| 加只读工具 | `src/pairrot/tools.py` 的 `TOOL_SPECS` 和 `review.py` 的 `_LOOKUP_TOOLS`。工具不能执行仓库代码 |
+| 加只读工具 | `src/pairrot/tools.py` 的 `RepoTools._dispatch`，`review.py` 的 `_LOOKUP_TOOLS` 和提示词里的 lookup 说明。工具不能执行仓库代码 |
 | 切片大小和并发 | `review.py` 的 `_SLICE_CHARS`、`_PARALLEL` |
 | 密钥识别规则 | `src/pairrot/redact.py`、`secrets_scan.py` |
 | 新的发布目标 | 参考 `publish_github.py` 和 `export.py` |

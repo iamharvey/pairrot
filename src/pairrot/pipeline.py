@@ -341,15 +341,6 @@ def review_change(
         if llm is not None and tracker.error is None:
             sources = load_sources(root, snapshot)
             evidence_cache: dict[str, str] = {}
-            review_tools = RepoTools(
-                root,
-                snapshot.base_sha,
-                snapshot.head_sha,
-                ticket_path=ticket_path,
-                ci_path=ci_path,
-                max_calls=budget.max_tool_calls_per_perspective,
-                cache=evidence_cache,
-            )
             passes = [(prompt_for(policy), policy.main_categories() if policy.active else None, "")]
             facts = ""
             if policy.active:
@@ -361,22 +352,19 @@ def review_change(
 
             def run_pass(index: int):
                 prompt, allowed, facts = passes[index]
-                tools = review_tools if index == 0 else RepoTools(
-                    root,
-                    snapshot.base_sha,
-                    snapshot.head_sha,
-                    ticket_path=ticket_path,
-                    ci_path=ci_path,
-                    max_calls=budget.max_tool_calls_per_perspective,
-                    cache=evidence_cache,
-                )
                 return review_diff(
                     llm=llm,
                     repo=root,
                     snapshot=snapshot,
                     tracker=tracker,
                     model=reviewer_model,
-                    tool_host=tools,
+                    tool_host=RepoTools(
+                        root,
+                        snapshot.base_sha,
+                        snapshot.head_sha,
+                        max_calls=budget.max_tool_calls_per_perspective,
+                        cache=evidence_cache,
+                    ),
                     sources=sources,
                     prompt=prompt,
                     allowed=allowed,
@@ -389,7 +377,7 @@ def review_change(
             for found, lost, pass_diffs, pass_packs in results:
                 findings += found
                 dropped += lost
-                diffs = pass_diffs
+                diffs.update(pass_diffs)
                 packs.update(pass_packs)
             findings, duplicates = _dedupe(findings)
             findings, gated = gate_simplifications(

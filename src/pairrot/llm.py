@@ -1,7 +1,7 @@
 """OpenAI-compatible chat client and an in-process fake for tests.
 
-The only network implementation is Chat Completions. Tests use FakeModel and
-never open a socket.
+The only network implementation is Chat Completions. Lookups are asked for inside the
+JSON answer, not through function calling. Tests use FakeModel and never open a socket.
 """
 
 from __future__ import annotations
@@ -11,19 +11,11 @@ import os
 from typing import Any, Protocol
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class ModelError(RuntimeError):
     pass
-
-
-class ToolCall(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    id: str
-    name: str
-    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatMessage(BaseModel):
@@ -31,9 +23,6 @@ class ChatMessage(BaseModel):
 
     role: str
     content: str | None = None
-    tool_calls: list[ToolCall] | None = None
-    tool_call_id: str | None = None
-    name: str | None = None
 
 
 class Completion(BaseModel):
@@ -46,74 +35,14 @@ class Completion(BaseModel):
 
 
 class LLM(Protocol):
-    def complete(
-        self,
-        messages: list[ChatMessage],
-        tools: list[dict[str, Any]] | None = None,
-        *,
-        model: str | None = None,
-    ) -> Completion: ...
-
-
-def _parse_arguments(raw: Any) -> dict[str, Any]:
-    if raw is None:
-        return {}
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str):
-        if not raw.strip():
-            return {}
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            return {"_raw": raw}
-        if isinstance(parsed, dict):
-            return parsed
-        return {"_raw": raw}
-    return {"_raw": str(raw)}
-
-
-def _message_to_api(message: ChatMessage) -> dict[str, Any]:
-    if message.role == "tool":
-        return {
-            "role": "tool",
-            "tool_call_id": message.tool_call_id or "",
-            "content": message.content or "",
-        }
-    body: dict[str, Any] = {"role": message.role, "content": message.content or ""}
-    if message.tool_calls:
-        body["tool_calls"] = [
-            {
-                "id": call.id,
-                "type": "function",
-                "function": {
-                    "name": call.name,
-                    "arguments": json.dumps(call.arguments, ensure_ascii=False),
-                },
-            }
-            for call in message.tool_calls
-        ]
-    return body
+    def complete(self, messages: list[ChatMessage], *, model: str | None = None) -> Completion: ...
 
 
 def _message_from_api(payload: dict[str, Any]) -> ChatMessage:
-    calls = []
-    for raw in payload.get("tool_calls") or []:
-        function = raw.get("function") or {}
-        calls.append(
-            ToolCall(
-                id=str(raw.get("id") or ""),
-                name=str(function.get("name") or ""),
-                arguments=_parse_arguments(function.get("arguments")),
-            )
-        )
     content = payload.get("content")
-    if not isinstance(content, str):
-        content = None if calls else ""
     return ChatMessage(
         role=str(payload.get("role") or "assistant"),
-        content=content,
-        tool_calls=calls or None,
+        content=content if isinstance(content, str) else "",
     )
 
 
@@ -140,21 +69,12 @@ class OpenAICompatibleClient:
             return self.base_url
         return self.base_url + "/chat/completions"
 
-    def complete(
-        self,
-        messages: list[ChatMessage],
-        tools: list[dict[str, Any]] | None = None,
-        *,
-        model: str | None = None,
-    ) -> Completion:
+    def complete(self, messages: list[ChatMessage], *, model: str | None = None) -> Completion:
         body: dict[str, Any] = {
             "model": model or self.model,
-            "messages": [_message_to_api(item) for item in messages],
+            "messages": [{"role": item.role, "content": item.content or ""} for item in messages],
             "temperature": 0,
         }
-        if tools:
-            body["tools"] = tools
-            body["tool_choice"] = "auto"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -185,21 +105,15 @@ class OpenAICompatibleClient:
 
 
 class FakeModel:
-    """Scripted model. `handler(messages, tools, model) -> Completion`."""
+    """Scripted model. `handler(messages, model) -> Completion`."""
 
     def __init__(self, handler: Any) -> None:
         self.handler = handler
         self.calls: list[dict[str, Any]] = []
 
-    def complete(
-        self,
-        messages: list[ChatMessage],
-        tools: list[dict[str, Any]] | None = None,
-        *,
-        model: str | None = None,
-    ) -> Completion:
-        self.calls.append({"messages": list(messages), "tools": tools, "model": model})
-        result = self.handler(messages, tools, model)
+    def complete(self, messages: list[ChatMessage], *, model: str | None = None) -> Completion:
+        self.calls.append({"messages": list(messages), "model": model})
+        result = self.handler(messages, model)
         if not isinstance(result, Completion):
             raise TypeError("FakeModel handler must return Completion")
         return result

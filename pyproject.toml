@@ -1,7 +1,7 @@
 [project]
 name = "pairrot"
 version = "0.1.0"
-description = "Phase 1 local correctness review: snapshot, verify, and offline replay."
+description = "Code review that verifies each finding before it is posted: snapshot, review, verify, publish, and offline replay."
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.6",

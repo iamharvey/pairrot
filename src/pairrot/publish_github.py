@@ -115,7 +115,9 @@ def _lock_note(finding: Finding) -> str:
 def _simplification(finding: Finding, suggestable: bool) -> str:
     replacement = finding.replacement or ""
     fence = _fence(replacement)
-    if suggestable:
+    if suggestable and not replacement:
+        block = f"{fence}suggestion\n{fence}"
+    elif suggestable:
         block = f"{fence}suggestion\n{replacement}\n{fence}"
     elif finding.replacement is None and finding.edits:
         block = "需要一起改：\n" + "\n".join(f"- {edit}" for edit in finding.edits)

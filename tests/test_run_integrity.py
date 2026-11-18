@@ -131,7 +131,7 @@ def test_a_finding_reported_twice_is_verified_once(tmp_path: Path):
     richer = {**finding, "evidence": [{"type": "diff", "ref": "app.py:2", "note": "operator flipped"}]}
     verified: list[str] = []
 
-    def handler(messages, tools, model):
+    def handler(messages, model):
         if "独立验证" in (messages[0].content or ""):
             verified.append(messages[1].content or "")
             return _completion({"verdict": "confirmed", "reason": "成立", "checked": ["path_reachable"]})

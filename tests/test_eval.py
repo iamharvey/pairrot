@@ -169,7 +169,7 @@ def _feature_repo(tmp_path: Path) -> tuple[Path, str, str]:
 
 
 def _model() -> FakeModel:
-    def handler(messages, tools, model):
+    def handler(messages, model):
         system = messages[0].content or ""
         blob = "\n".join(message.content or "" for message in messages)
         if "独立验证" in system:
@@ -386,6 +386,36 @@ def test_replay_rules_for_noise_misses_and_missing_c(tmp_path: Path):
     assert report["by_category"]["logic_error"]["confirmed"] == 2
     assert "不要用总召回代替" in report["note"]
     assert not (dataset / "dataset_c.jsonl").exists()
+
+
+def test_dataset_b_hit_needs_the_finding_in_a_file_the_fix_changed(tmp_path: Path):
+    repo, _base, feature = _feature_repo(tmp_path)
+    git(repo, "checkout", "feature")
+    write(repo, "app.py", "def add(a, b):\n    return a + b\n")
+    fixed_here = commit(repo, "fix app")
+    write(repo, "other.py", "VALUE = 2\n")
+    fixed_elsewhere = commit(repo, "fix other")
+    git(repo, "checkout", "main")
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    (dataset / "dataset_a.jsonl").write_text("", encoding="utf-8")
+    defect = {"repo": "demo", "intro_commit": feature, "category": "逻辑错误", "category_key": "logic_error"}
+    rows = [
+        {**defect, "defect_id": "SAME", "fix_commit": fixed_here},
+        {**defect, "defect_id": "ELSEWHERE", "fix_commit": fixed_elsewhere},
+        {**defect, "defect_id": "NOFIX"},
+    ]
+    (dataset / "dataset_b.jsonl").write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    report = replay(dataset, tmp_path, tmp_path / "out", llm=_model())
+    items = {item["defect_id"]: item for item in report["dataset_b"]["items"]}
+    assert (items["SAME"]["hit"], items["SAME"]["match"]) == (True, "fix_files")
+    assert (items["ELSEWHERE"]["hit"], items["ELSEWHERE"]["match"]) == (False, "fix_files")
+    assert (items["NOFIX"]["hit"], items["NOFIX"]["match"]) == (True, "category_only")
+    logic = report["by_category"]["logic_error"]
+    assert (logic["recall_hits"], logic["category_only_hits"], logic["recall_total"]) == (2, 1, 3)
 
 
 def test_dataset_c_clean_is_zero_confirmed(tmp_path: Path):
