@@ -8,7 +8,15 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from pairrot.budget import BudgetTracker
-from pairrot.context import callees, callers, diff_hunks, enclosing_name, function_window, numbered
+from pairrot.context import (
+    callees,
+    callers,
+    diff_hunks,
+    enclosing_name,
+    function_window,
+    module_header,
+    numbered,
+)
 from pairrot.evidence import EvidencePiece, render_pack
 from pairrot.llm import ChatMessage, LLM
 from pairrot.models import Finding, IntroducedIn, Verdict, Verification, norm_path
@@ -24,12 +32,14 @@ VERIFY_CHECKS = (
 
 VERIFY_SYSTEM_PROMPT = """你是独立验证者。你没有参与提出这条候选，也不要假设它成立。
 输入里没有评审模型的推理，只有候选和一个有大小上限的证据包。每条证据含 source、rev、ref、complete、text。
-source 含义：function 是候选所在的整个函数（head）；diff 是覆盖该函数的变更块；callee 是该函数调用的、在本次变更文件里定义的函数；caller 是 head 全仓对该函数调用点的检索结果；lookup 是评审要求查询的内容。
+source 含义：module 是文件开头的模块文档（head），模块级约定和数据规模写在这里；function 是候选所在的整个函数（head）；diff 是覆盖该函数的变更块；callee 是该函数调用的、在本次变更文件里定义的函数；caller 是 head 全仓对该函数调用点的检索结果；lookup 是评审要求查询的内容。
 rev 是版本。complete 为 false 表示这条证据被截断或没有取到。
 不要调用工具。
 核对四点：路径是否真的能发生、代码或调用方是否已经挡住、缺陷是否这次变更引入、后果有没有说大。
 caller 检索完整但没有调用方时，按函数自己的文档、签名和实现判断：公开函数违反自己写明的约定就算可达，不要只因没有调用方判 undecided。
 只有判断所依赖的证据缺失或 complete 为 false 时，verdict 才是 undecided。
+security 候选还要核对：输入是否真的来自外部（看函数文档和调用方），中途有没有参数化、白名单、归属校验或脱敏挡住。
+performance 候选还要核对：写明的输入规模在文档或调用方里有依据，循环或查询次数确实随规模增长。
 
 只返回 JSON：
 {"verdict":"confirmed","reason":"一句话","introduced_in":"this_change","consequence":"","checked":["path_reachable","existing_protection","introduced_in_this_change","consequence_exaggerated"]}
@@ -147,6 +157,17 @@ def _pieces(
             text=diff_hunks(diffs.get(path, ""), first, last),
         ),
     ]
+    header = module_header(rows) if rows else None
+    if header and header[1] < first:
+        pieces.insert(
+            0,
+            EvidencePiece(
+                source="module",
+                rev=head_sha,
+                ref=f"{path}:{header[0]}-{header[1]}",
+                text=numbered(rows, *header),
+            ),
+        )
     for callee_path, lo, hi, text in callees(rows, first, last, start, end, sources) if rows else []:
         pieces.append(EvidencePiece(source="callee", rev=head_sha, ref=f"{callee_path}:{lo}-{hi}", text=text))
     if repo is not None:

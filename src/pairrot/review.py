@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from pairrot.budget import BudgetTracker
+from pairrot.context import relocate
 from pairrot.evidence import EvidencePiece, render_pack
 from pairrot.llm import ChatMessage, LLM
 from pairrot.models import (
@@ -32,7 +33,7 @@ from pairrot.policy import Policy
 from pairrot.snapshot import Snapshot, file_diff, run_git
 from pairrot.tools import RepoTools
 
-PROMPT_VERSION = "phase1-correctness-v6"
+PROMPT_VERSION = "phase1-correctness-v9"
 _SLICE_CHARS = 32_000
 _PARALLEL = 4
 _LOOKUP_TOOLS = {"read_file", "search_code", "find_references", "list_tests"}
@@ -87,6 +88,12 @@ def prompt_for(policy: Policy) -> str:
     ]
     if policy.performance_enabled:
         lines.append("性能问题必须写明输入规模和可以观察到的后果。说不出规模或后果就不要输出。")
+    if policy.security_enabled:
+        lines.append(
+            "security 只报能说出利用路径的问题：攻击者能控制的输入从哪里进来（以函数文档或调用方为准）、"
+            "到达哪个操作、造成什么后果，例如拼接 SQL、缺少归属校验、敏感数据写进日志、用 == 比较令牌或签名。"
+            "不报加固建议，不报硬编码密钥（另有确定性规则）。"
+        )
     for instruction in policy.extras:
         lines.append(instruction)
     return "\n".join(lines)
@@ -240,24 +247,45 @@ def _lookup_complete(result: str | None) -> bool:
     return True
 
 
-def _gather_lookups(tool_host: RepoTools, lookups: list[dict]) -> list[EvidencePiece]:
+def _gather_lookups(
+    tool_host: RepoTools, lookups: list[tuple[str, dict]]
+) -> tuple[list[EvidencePiece], set[str]]:
+    """Run lookups. Also return the fingerprints whose own lookups did not complete."""
     pieces: list[EvidencePiece] = []
-    for entry in lookups:
+    incomplete: set[str] = set()
+    for owner, entry in lookups:
         result = tool_host.try_execute(str(entry.get("tool")), entry)
         if result is None:
             text = "工具调用达到上限，未执行"
         else:
             text = result
-        pieces.append(
-            EvidencePiece(
-                source="lookup",
-                rev=_lookup_rev(entry, tool_host),
-                ref=_lookup_ref(entry),
-                text=text,
-                complete=_lookup_complete(result),
-            )
+        piece = EvidencePiece(
+            source="lookup",
+            rev=_lookup_rev(entry, tool_host),
+            ref=_lookup_ref(entry),
+            text=text,
+            complete=_lookup_complete(result),
         )
-    return pieces
+        pieces.append(piece)
+        if not piece.complete:
+            incomplete.add(owner)
+    return pieces, incomplete
+
+
+def _overlaps(a: Finding, b: Finding) -> bool:
+    return (
+        a.location.file == b.location.file
+        and a.location.start_line <= b.location.end_line
+        and b.location.start_line <= a.location.end_line
+    )
+
+
+def _hold_dependents(chosen: list[Finding], askers: list[Finding]) -> list[Finding]:
+    """Mark undecided only the findings that rest on a lookup that did not complete."""
+    return [
+        _insufficient(finding) if any(_overlaps(finding, asker) for asker in askers) else finding
+        for finding in chosen
+    ]
 
 
 def _insufficient(finding: Finding) -> Finding:
@@ -273,13 +301,6 @@ def _insufficient(finding: Finding) -> Finding:
 
 
 def _withdrawn(first: list[Finding], revised: list[Finding]) -> list[DroppedCandidate]:
-    def overlaps(a: Finding, b: Finding) -> bool:
-        return (
-            a.location.file == b.location.file
-            and a.location.start_line <= b.location.end_line
-            and b.location.start_line <= a.location.end_line
-        )
-
     return [
         DroppedCandidate(
             reason="查询后撤回",
@@ -288,7 +309,7 @@ def _withdrawn(first: list[Finding], revised: list[Finding]) -> list[DroppedCand
             trigger=finding.trigger,
         )
         for finding in first
-        if not any(overlaps(finding, kept) for kept in revised)
+        if not any(_overlaps(finding, kept) for kept in revised)
     ]
 
 
@@ -399,8 +420,10 @@ def validate_candidate(
             trigger=strip_secrets(trigger),
         )
     source = sources.get(file, "")
-    symbol = nearest_symbol(source, start) if source else "unknown"
     snippet = raw.get("snippet")
+    if source and isinstance(snippet, str):
+        start, end = relocate(source.splitlines(), snippet, start, end)
+    symbol = nearest_symbol(source, start) if source else "unknown"
     if not isinstance(snippet, str) or not snippet.strip():
         if source and start <= len(source.splitlines()):
             rows = source.splitlines()
@@ -449,7 +472,8 @@ def parse_review_output(
     reviewed_paths: set[str],
     sources: dict[str, str],
     allowed: frozenset[Category] | None = None,
-) -> tuple[list[Finding], list[DroppedCandidate], list[dict]]:
+) -> tuple[list[Finding], list[DroppedCandidate], list[tuple[str, dict]]]:
+    """Findings, drops, and each requested lookup paired with the fingerprint that asked."""
     data = extract_json(content)
     if isinstance(data, list):
         items = data
@@ -459,14 +483,14 @@ def parse_review_output(
         return [], [DroppedCandidate(reason="模型输出无法解析")], []
     findings: list[Finding] = []
     dropped: list[DroppedCandidate] = []
-    lookups: list[dict] = []
+    lookups: list[tuple[str, dict]] = []
     for item in items:
         finding, reason = validate_candidate(
             item, reviewed_paths=reviewed_paths, sources=sources, allowed=allowed
         )
         if finding is not None:
             findings.append(finding)
-            lookups.extend(_clean_lookups(item))
+            lookups.extend((finding.fingerprint, entry) for entry in _clean_lookups(item))
         if reason is not None:
             dropped.append(reason)
     return findings, dropped, lookups
@@ -502,7 +526,7 @@ def _review_slice(
     )
     if not findings or not lookups:
         return findings, dropped, []
-    pieces = _gather_lookups(tool_host, lookups)
+    pieces, incomplete = _gather_lookups(tool_host, lookups)
     if any(piece.text == "工具调用达到上限，未执行" for piece in pieces):
         tracker.mark("工具调用达到上限")
     diff = EvidencePiece(
@@ -512,10 +536,9 @@ def _review_slice(
         text="\n".join(parts),
     )
     pack = render_pack([*pieces, diff])
-    incomplete = any(not piece.complete for piece in pieces)
+    askers = [finding for finding in findings if finding.fingerprint in incomplete]
     if not tracker.allow_model_call():
-        chosen = [_insufficient(finding) for finding in findings] if incomplete else findings
-        return chosen, dropped, pieces
+        return _hold_dependents(findings, askers), dropped, pieces
     follow = [
         ChatMessage(role="system", content=prompt),
         ChatMessage(role="user", content=_followup_message(findings, pack)),
@@ -524,8 +547,7 @@ def _review_slice(
         revised_completion = llm.complete(follow, None, model=model)
     except Exception as exc:
         tracker.set_error(str(exc))
-        chosen = [_insufficient(finding) for finding in findings] if incomplete else findings
-        return chosen, dropped, pieces
+        return _hold_dependents(findings, askers), dropped, pieces
     tracker.add_completion(revised_completion)
     revised, extra, _ = parse_review_output(
         revised_completion.message.content,
@@ -539,9 +561,7 @@ def _review_slice(
     else:
         chosen = revised
         extra = extra + _withdrawn(findings, revised)
-    if incomplete:
-        chosen = [_insufficient(finding) for finding in chosen]
-    return chosen, dropped + extra, pieces
+    return _hold_dependents(chosen, askers), dropped + extra, pieces
 
 
 def review_diff(

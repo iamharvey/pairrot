@@ -161,9 +161,15 @@ def _apply_levels(findings: list[Finding], policy: Policy) -> list[Finding]:
     if not policy.active:
         return findings
     return [
-        finding.model_copy(update={"level": policy.level_for(finding.category)})
+        finding.model_copy(
+            update={"level": policy.level_for(finding.category, secret=_is_secret(finding))}
+        )
         for finding in findings
     ]
+
+
+def _is_secret(finding: Finding) -> bool:
+    return finding.verification is not None and "secret_pattern" in finding.verification.checked
 
 
 def review_change(

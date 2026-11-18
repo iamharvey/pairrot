@@ -15,7 +15,7 @@ def token_matches(given: str, expected: str) -> bool:
 def signature_ok(body: bytes, secret: bytes, signature: str) -> bool:
     """Check the HMAC-SHA256 signature of a webhook body."""
     expected = hmac.new(secret, body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    return hmac.compare_digest(expected.encode(), signature.encode())
 
 
 class RateClient:

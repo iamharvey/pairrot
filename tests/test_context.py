@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pairrot.context import callees, callers, diff_hunks, enclosing_name, function_window
+from pairrot.context import (
+    callees,
+    callers,
+    diff_hunks,
+    enclosing_name,
+    function_window,
+    module_header,
+    relocate,
+)
 from tests.conftest import commit, init_repo, seed, write
 
 GATEWAY = '''class GatewayError(Exception):
@@ -71,6 +79,25 @@ def test_callees_prefer_functions_nearest_the_finding():
     assert names[0].endswith("def charge(self, amount):")
     assert any(name.endswith("def helper(x):") for name in names)
     assert names[-1].endswith("class GatewayError(Exception):")
+
+
+def test_module_header_finds_docstrings_and_comment_blocks():
+    doc = '"""Daily job.\n\nAbout 100k rows a day.\n"""\n\nimport os\n'
+    assert module_header(_lines(doc)) == (1, 4)
+    assert module_header(_lines('"""One line."""\nx = 1\n')) == (1, 1)
+    assert module_header(_lines("#!/usr/bin/env python\n# Never log card numbers.\nx = 1\n")) == (2, 2)
+    assert module_header(_lines("// Shared by all threads.\n// Keep it short.\nlet x = 1;\n")) == (1, 2)
+    assert module_header(_lines(SHOP)) is None
+
+
+def test_relocate_moves_drifted_lines_onto_the_snippet():
+    rows = _lines(SHOP)
+    assert relocate(rows, "client.charge(total)", 2, 3) == (11, 11)
+    assert relocate(rows, "try:\n    client.charge(total)", 10, 12) == (10, 12)
+    assert relocate(rows, "def place(client, amount):\n    total = helper(amount)", 14, 16) == (8, 9)
+    assert relocate(rows, "def place(client, amount): total = helper(amount)", 4, 9) == (8, 8)
+    assert relocate(rows, "nothing like this here", 2, 3) == (2, 3)
+    assert relocate(rows, "", 2, 3) == (2, 3)
 
 
 def test_callers_list_call_sites_and_report_none_found(tmp_path: Path):
