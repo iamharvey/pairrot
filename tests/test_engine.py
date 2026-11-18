@@ -265,6 +265,26 @@ def test_tool_call_cap_is_per_perspective_and_defaults():
     assert Budget().cost_cap is None
 
 
+def test_capped_lookup_holds_only_the_finding_that_asked_for_it(tmp_path: Path):
+    body = "def add(a, b):\n    return a - b\n\n\ndef half(x):\n    return x * 2\n"
+    repo, base, tip = _changed_repo(tmp_path, body)
+    asking = _finding()
+    asking["lookup"] = [{"tool": "search_code", "pattern": f"p{i}"} for i in range(2)]
+    plain = _finding(start_line=6, end_line=6, snippet="return x * 2", trigger="half(4) returns 8")
+    verify = {"verdict": "confirmed", "reason": "成立", "checked": ["path_reachable"], "introduced_in": "this_change"}
+    report = review_change(
+        repo,
+        base,
+        tip,
+        tmp_path / "out",
+        llm=_scripted({"findings": [asking, plain]}, verify),
+        budget=Budget(max_tool_calls_per_perspective=1),
+    )
+    assert "工具调用达到上限" in report.partial_reasons
+    assert [item.location.start_line for item in report.confirmed] == [6]
+    assert [item.verification.reason for item in report.undecided] == ["查询证据不足，未完成复核"]
+
+
 def test_lookup_followup_keeps_a_bounded_pack_and_stops_at_the_cap(tmp_path: Path):
     repo, base, tip = _changed_repo(tmp_path)
     seen: dict[str, str] = {}

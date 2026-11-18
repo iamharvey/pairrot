@@ -17,6 +17,7 @@ CALLER_CONTEXT = 3
 MAX_CALLEES = 3
 MAX_CLASSES = 2
 MAX_CALLERS = 4
+MODULE_LINES = 15
 
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 _CALL = re.compile(
@@ -83,6 +84,79 @@ def enclosing_name(lines: list[str], start: int, end: int) -> str | None:
 
 def numbered(lines: list[str], first: int, last: int) -> str:
     return "\n".join(f"{n}:{lines[n - 1]}" for n in range(first, min(last, len(lines)) + 1))
+
+
+def module_header(lines: list[str]) -> tuple[int, int] | None:
+    """1-based range of the docstring or comment block that opens the file."""
+    first = next((i for i, text in enumerate(lines) if text.strip()), None)
+    if first is None:
+        return None
+    head = lines[first].strip()
+    if head.startswith(("#!", "# -*-")):
+        first += 1
+        if first >= len(lines):
+            return None
+        head = lines[first].strip()
+    for quote in ('"""', "'''"):
+        if head.startswith(quote):
+            if head.count(quote) >= 2 and len(head) > 3:
+                return first + 1, first + 1
+            for i in range(first + 1, min(len(lines), first + MODULE_LINES)):
+                if quote in lines[i]:
+                    return first + 1, i + 1
+            return first + 1, min(len(lines), first + MODULE_LINES)
+    if head.startswith(("#", "//", "/*")):
+        last = first
+        while last + 1 < len(lines) and last + 1 < first + MODULE_LINES:
+            text = lines[last + 1].strip()
+            if not text.startswith(("#", "//", "*", "/*")):
+                break
+            last += 1
+        return first + 1, last + 1
+    return None
+
+
+def relocate(lines: list[str], snippet: str, start: int, end: int, radius: int = 60) -> tuple[int, int]:
+    """Move start..end onto the snippet when the model's line numbers drifted."""
+    rows = [text.strip() for text in snippet.splitlines() if text.strip()]
+    offset = next((i for i, text in enumerate(rows) if len(text) >= 8), None)
+    if offset is None or not lines:
+        return start, end
+    probe = rows[offset]
+
+    def matches(number: int) -> bool:
+        if not 1 <= number <= len(lines):
+            return False
+        text = lines[number - 1].strip()
+        if len(text) < 8:
+            return False
+        return text.startswith(probe[:40]) or probe.startswith(text[:40])
+
+    expected = start + offset
+    if matches(expected):
+        return start, end
+    found = [
+        n
+        for n in range(max(1, expected - radius), min(len(lines), expected + radius) + 1)
+        if matches(n)
+    ]
+    if not found:
+        return start, end
+    wanted = " ".join(rows[offset:])
+
+    def agreement(number: int) -> int:
+        text = " ".join(row.strip() for row in lines[number - 1 : number - 1 + len(rows) + 5])
+        size = 0
+        for a, b in zip(text, wanted):
+            if a != b:
+                break
+            size += 1
+        return size
+
+    best = max(found, key=lambda n: (agreement(n), -abs(n - expected)))
+    first = max(1, best - offset)
+    span = min(end - start, max(len(rows) - 1, offset))
+    return first, min(len(lines), first + span)
 
 
 def function_window(lines: list[str], start: int, end: int) -> tuple[int, int, bool]:
