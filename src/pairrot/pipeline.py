@@ -91,12 +91,17 @@ def _decide_status(
     return RunStatus.passed
 
 
+def _reusable(status: str | None, error: str | None) -> bool:
+    """A run cut short by a model or transport error must be retried, not replayed."""
+    return status != RunStatus.failed.value and not error
+
+
 def _write_report(report: RunReport, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(dump_model(report), ensure_ascii=False, indent=2) + "\n"
     latest = out_dir / "report.json"
     latest.write_text(payload, encoding="utf-8")
-    if report.reuse_key and report.status != RunStatus.failed and not report.reused:
+    if _reusable(report.status.value, report.error) and report.reuse_key and not report.reused:
         runs = out_dir / "runs"
         runs.mkdir(exist_ok=True)
         (runs / f"{report.reuse_key}.json").write_text(payload, encoding="utf-8")
@@ -114,7 +119,7 @@ def _load_reusable(out_dir: Path, key: str) -> RunReport | None:
             continue
         if data.get("reuse_key") != key:
             continue
-        if data.get("status") == RunStatus.failed.value:
+        if not _reusable(data.get("status"), data.get("error")):
             continue
         try:
             return RunReport.model_validate(data)
@@ -307,6 +312,7 @@ def review_change(
                     packs=packs,
                     base_sha=snapshot.base_sha,
                     head_sha=snapshot.head_sha,
+                    repo=Path(repo),
                 )
             elif pending:
                 reason = tracker.reasons[-1] if tracker.reasons else "预算用尽，未完成验证"

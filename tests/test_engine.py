@@ -318,6 +318,95 @@ def test_lookup_followup_keeps_a_bounded_pack_and_stops_at_the_cap(tmp_path: Pat
     assert all(call["tools"] is None for call in model.calls)
 
 
+def _lookup_handler(followup: dict, first: list[dict]):
+    def handler(messages, tools, model):
+        system = messages[0].content or ""
+        user = messages[-1].content or ""
+        if "独立验证" in system:
+            return _completion(
+                {
+                    "verdict": "confirmed",
+                    "reason": "成立",
+                    "checked": ["path_reachable"],
+                    "introduced_in": "this_change",
+                }
+            )
+        if "证据包" in user:
+            return _completion(followup)
+        payloads = [dict(item, lookup=[{"tool": "search_code", "pattern": "add"}]) for item in first]
+        return _completion({"findings": payloads})
+
+    return handler
+
+
+def test_empty_followup_keeps_first_pass_findings(tmp_path: Path):
+    repo, base, tip = _changed_repo(tmp_path)
+    model = FakeModel(_lookup_handler({"findings": []}, [_finding()]))
+    report = review_change(repo, base, tip, tmp_path / "out", llm=model)
+    assert len(report.confirmed) == 1
+    assert report.dropped == []
+
+
+def test_followup_withdrawal_is_recorded(tmp_path: Path):
+    body = "def add(a, b):\n    return a - b\n\n\ndef mul(a, b):\n    return a + b\n"
+    repo, base, tip = _changed_repo(tmp_path, body)
+    second = _finding(start_line=6, end_line=6, snippet="return a + b", trigger="adds when it should multiply")
+    model = FakeModel(_lookup_handler({"findings": [_finding()]}, [_finding(), second]))
+    report = review_change(repo, base, tip, tmp_path / "out", llm=model)
+    assert [item.location.start_line for item in report.confirmed] == [2]
+    assert [(item.reason, item.file, item.trigger) for item in report.dropped] == [
+        ("查询后撤回", "app.py", "adds when it should multiply")
+    ]
+
+
+def test_verification_runs_in_parallel_and_keeps_order(tmp_path: Path):
+    import threading
+    import time
+
+    body = "".join(f"def f{i}(a, b):\n    return a - b - {i}\n" for i in range(4))
+    repo, base, tip = _changed_repo(tmp_path, body)
+    gauge = {"now": 0, "peak": 0}
+    lock = threading.Lock()
+
+    def verify(messages):
+        with lock:
+            gauge["now"] += 1
+            gauge["peak"] = max(gauge["peak"], gauge["now"])
+        time.sleep(0.05)
+        with lock:
+            gauge["now"] -= 1
+        return {"verdict": "confirmed", "reason": "成立", "checked": [], "introduced_in": "this_change"}
+
+    first = [
+        _finding(start_line=2 * i + 2, end_line=2 * i + 2, snippet=f"return a - b - {i}", trigger=f"T{i}")
+        for i in range(4)
+    ]
+    report = review_change(repo, base, tip, tmp_path / "out", llm=_scripted({"findings": first}, verify))
+    assert gauge["peak"] > 1
+    assert [item.trigger for item in report.confirmed] == ["T0", "T1", "T2", "T3"]
+
+
+def test_run_with_model_error_is_not_reused(tmp_path: Path):
+    repo, base, tip = _changed_repo(tmp_path)
+    box = {"fail": True}
+
+    def verify(messages):
+        if box["fail"]:
+            raise RuntimeError("模型请求失败: ReadTimeout")
+        return {"verdict": "confirmed", "reason": "成立", "checked": [], "introduced_in": "this_change"}
+
+    model = _scripted({"findings": [_finding()]}, verify)
+    out = tmp_path / "out"
+    first = review_change(repo, base, tip, out, llm=model)
+    assert first.status == RunStatus.partial
+    assert first.error
+    box["fail"] = False
+    second = review_change(repo, base, tip, out, llm=model)
+    assert not second.reused
+    assert second.error is None
+    assert len(second.confirmed) == 1
+
+
 def test_lookup_does_not_block_verification(tmp_path: Path):
     repo, base, tip = _changed_repo(tmp_path)
     seen: dict[str, str] = {}
@@ -355,7 +444,8 @@ def test_lookup_does_not_block_verification(tmp_path: Path):
     verify = seen["verify"]
     assert '"source": "lookup"' in verify
     assert '"source": "diff"' in verify
-    assert '"source": "nearby"' in verify
+    assert '"source": "function"' in verify
+    assert '"source": "caller"' in verify
     assert f'"rev": "{tip}"' in verify
     assert "search_code add" in verify
     assert all(call["tools"] is None for call in model.calls)

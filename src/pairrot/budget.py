@@ -73,4 +73,9 @@ class BudgetTracker:
                 if "费用达到上限" not in self.reasons:
                     self.reasons.append("费用达到上限")
                 return False
+            if self.clock.elapsed() >= self.budget.wall_clock_seconds:
+                self.exhausted = True
+                if "墙钟达到上限" not in self.reasons:
+                    self.reasons.append("墙钟达到上限")
+                return False
             return True
