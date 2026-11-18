@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Callable
 
 from pairrot.complexity_budget import changed_rows, references, top_level_name
 from pairrot.context import block_end, defined_name, enclosing
@@ -13,9 +14,11 @@ from pairrot.tools import looks_like_test
 
 MAX_SYMBOLS = 60
 MAX_SITES = 6
+LIMIT = 6000
 _ALIAS = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_.]*)\s*(?:#.*)?$")
 _FLAG = re.compile(r"^([A-Z][A-Z0-9_]*)\s*=\s*(True|False)\s*(?:#.*)?$")
 HEADER = "下面是 pairrot 用 git 统计的事实，不是推断。"
+TRUNCATED = "（事实没有列全：超出了长度或时间上限。没有列出的符号不代表没有调用方或引用。）"
 
 
 def _assignments(repo: Path, head_sha: str, name: str) -> list[str]:
@@ -88,13 +91,41 @@ def _same_body(repo: Path, head_sha: str, path: str, name: str, rows: list[str],
     return None
 
 
-def design_facts(repo: Path, snapshot: Snapshot, sources: dict[str, str]) -> str:
+def _fit(parts: list[str], limit: int, truncated: bool) -> str:
+    """Whole rows only, so a cut never leaves half a row that reads as a complete fact."""
+    room = limit - len(TRUNCATED) - 1
+    kept: list[str] = []
+    size = 0
+    for row in parts:
+        if size + len(row) + 1 > room:
+            truncated = True
+            break
+        kept.append(row)
+        size += len(row) + 1
+    if truncated:
+        kept.append(TRUNCATED)
+    return "\n".join(kept)
+
+
+def design_facts(
+    repo: Path,
+    snapshot: Snapshot,
+    sources: dict[str, str],
+    *,
+    limit: int = LIMIT,
+    stop: Callable[[], bool] | None = None,
+) -> str:
+    """Facts for the design pass. stop is polled between git calls; once it returns True the rest is left out and marked."""
     signatures: list[str] = []
     symbols: list[str] = []
     duplicates: list[str] = []
     flags: list[str] = []
     cache: dict[str, list[str]] = {}
+    truncated = False
     for span in snapshot.reviewed:
+        if stop is not None and stop():
+            truncated = True
+            break
         path = norm_path(span.path)
         if looks_like_test(path):
             continue
@@ -107,6 +138,9 @@ def design_facts(repo: Path, snapshot: Snapshot, sources: dict[str, str]) -> str
                 new[alias.group(1)] = row.strip()
         for row in added:
             flag = _FLAG.match(row)
+            if flag and (len(flags) >= MAX_SYMBOLS or (stop is not None and stop())):
+                truncated = True
+                break
             if flag:
                 sets = _assignments(repo, snapshot.head_sha, flag.group(1))
                 reads = references(repo, snapshot.head_sha, flag.group(1))
@@ -116,18 +150,27 @@ def design_facts(repo: Path, snapshot: Snapshot, sources: dict[str, str]) -> str
                 )
         rows = sources.get(path, "").splitlines()
         for name, line in new.items():
+            if stop is not None and stop():
+                truncated = True
+                break
             if name in old and old[name] != line:
+                if len(signatures) >= MAX_SYMBOLS:
+                    truncated = True
+                    continue
                 sites = _call_sites(repo, snapshot.head_sha, name)
                 listed = "；".join(sites[:MAX_SITES]) or "无"
                 signatures.append(f"- {path} {name}：旧 `{old[name]}`，新 `{line}`。head 全仓调用点：{listed}")
-            elif name not in old and not name.startswith("__") and len(symbols) < MAX_SYMBOLS:
+            elif name not in old and not name.startswith("__"):
+                if len(symbols) >= MAX_SYMBOLS:
+                    truncated = True
+                    continue
                 sites = references(repo, snapshot.head_sha, name)
                 where = "、".join(f"{site[0]}:{site[1]}" for site in sites[:MAX_SITES])
                 symbols.append(f"- {path} {name}：{len(sites)} 处" + (f"（{where}）" if where else ""))
                 twin = _same_body(repo, snapshot.head_sha, path, name, rows, cache) if path.endswith(".py") else None
                 if twin:
                     duplicates.append(f"- {path} {name} 的实现与 {twin} 完全相同")
-    if not (signatures or symbols or duplicates or flags):
+    if not (signatures or symbols or duplicates or flags or truncated):
         return ""
     parts = [HEADER]
     if signatures:
@@ -138,11 +181,20 @@ def design_facts(repo: Path, snapshot: Snapshot, sources: dict[str, str]) -> str
         parts += ["与仓库已有函数实现相同的新函数：", *duplicates]
     if flags:
         parts += ["新增的模块级布尔常量（赋值只有 1 处说明它不会变）：", *flags]
-    return "\n".join(parts)
+    return _fit(parts, limit, truncated)
+
+
+def is_complete(facts: str) -> bool:
+    return TRUNCATED not in facts
 
 
 def facts_for(facts: str, path: str) -> str:
-    """The fact rows that concern path, under the same header. Empty when none do."""
+    """The fact rows that concern path, under the same header.
+
+    Truncated facts always come back with the marker, because a missing row then means "not counted", not "no references".
+    """
     path = norm_path(path)
     rows = [row for row in facts.splitlines() if row.startswith("- ") and path in row]
-    return "\n".join([HEADER, *rows]) if rows else ""
+    if is_complete(facts):
+        return "\n".join([HEADER, *rows]) if rows else ""
+    return "\n".join([HEADER, *rows, TRUNCATED])

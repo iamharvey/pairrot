@@ -214,12 +214,12 @@ def _plan_leveled(
     pending_human: list[str] = []
     confirmed = sorted(report.confirmed, key=lambda item: _SEVERITY_ORDER[item.severity])
     for finding in confirmed:
-        if finding.fingerprint in posted:
-            continue
         path = norm_path(finding.location.file)
         line = _anchor(finding, diff_lines.get(path, set()))
         if finding.level == "must_fix":
-            if line is None:
+            if finding.fingerprint in posted:
+                must_lines.append(_one_line(finding, "已在行内评论"))
+            elif line is None:
                 must_lines.append(_one_line(finding, "不在本次 diff 的可评论行上"))
             else:
                 inline.append(_inline(finding, path, line, diff_lines.get(path, set())))
@@ -303,6 +303,7 @@ def _complexity_block(stats: ComplexityStats) -> str:
         f"新增类和函数 {len(stats.new_symbols)} 个，新增环境变量读取 {stats.new_env_reads} 处。\n\n"
         f"全仓只用一次或没用到的新符号：{single}\n\n"
         f"超出预算：{exceeded}\n\n"
+        + ("" if stats.complete else "统计没有做完（时间用尽），上面的数字是下限。\n\n")
     )
 
 
