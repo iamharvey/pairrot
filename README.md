@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="pairrot-logo-copyright.svg" alt="pairrot" width="100%">
+</p>
+
 # pairrot
 
 pairrot 是一个 AI 代码评审引擎：读取一次变更（两个固定的 commit），找出这次变更引入的逻辑错误和错误处理缺失，交给一个独立的验证者复核，只把复核成立的意见写回 PR。
