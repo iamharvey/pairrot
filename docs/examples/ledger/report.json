@@ -1,0 +1,1211 @@
+{
+  "status": "passed",
+  "base_sha": "e5fd71a835dd58082a02690ac49c8228284f09fa",
+  "head_sha": "7c218007cdd2e8fa5e3df62ec00f1ec31c05f19c",
+  "prompt_version": "review-v12",
+  "budget": {
+    "max_tool_calls_per_perspective": 2,
+    "wall_clock_seconds": 600,
+    "max_files": 40,
+    "max_changed_lines": 2000,
+    "cost_cap": null,
+    "cost_per_1k_tokens": 0.0
+  },
+  "reuse_key": "36e1c634902b49829e270b2a",
+  "reviewer_model": "deepseek-v4-flash",
+  "verifier_model": "deepseek-v4-flash",
+  "reviewed": [
+    {
+      "path": "demo/ledger/__init__.py",
+      "status": "A",
+      "added": 1,
+      "deleted": 0,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 1
+        }
+      ],
+      "reason": "",
+      "old_path": null
+    },
+    {
+      "path": "demo/ledger/db.py",
+      "status": "A",
+      "added": 44,
+      "deleted": 0,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 44
+        }
+      ],
+      "reason": "",
+      "old_path": null
+    },
+    {
+      "path": "demo/ledger/errors.py",
+      "status": "A",
+      "added": 33,
+      "deleted": 0,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 33
+        }
+      ],
+      "reason": "",
+      "old_path": null
+    },
+    {
+      "path": "demo/ledger/fees.py",
+      "status": "A",
+      "added": 105,
+      "deleted": 0,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 105
+        }
+      ],
+      "reason": "",
+      "old_path": null
+    },
+    {
+      "path": "demo/ledger/models.py",
+      "status": "A",
+      "added": 38,
+      "deleted": 0,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 38
+        }
+      ],
+      "reason": "",
+      "old_path": null
+    },
+    {
+      "path": "demo/ledger/money.py",
+      "status": "A",
+      "added": 20,
+      "deleted": 0,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 20
+        }
+      ],
+      "reason": "",
+      "old_path": null
+    },
+    {
+      "path": "demo/ledger/reconcile.py",
+      "status": "A",
+      "added": 71,
+      "deleted": 0,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 71
+        }
+      ],
+      "reason": "",
+      "old_path": null
+    },
+    {
+      "path": "demo/ledger/repo.py",
+      "status": "A",
+      "added": 104,
+      "deleted": 0,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 104
+        }
+      ],
+      "reason": "",
+      "old_path": null
+    },
+    {
+      "path": "demo/ledger/service.py",
+      "status": "A",
+      "added": 93,
+      "deleted": 0,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 93
+        }
+      ],
+      "reason": "",
+      "old_path": null
+    },
+    {
+      "path": "demo/ledger/statements.py",
+      "status": "A",
+      "added": 29,
+      "deleted": 0,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 29
+        }
+      ],
+      "reason": "",
+      "old_path": null
+    },
+    {
+      "path": "demo/ledger/tokens.py",
+      "status": "A",
+      "added": 55,
+      "deleted": 0,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 55
+        }
+      ],
+      "reason": "",
+      "old_path": null
+    },
+    {
+      "path": "demo/ledger/transfers.py",
+      "status": "A",
+      "added": 51,
+      "deleted": 0,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 51
+        }
+      ],
+      "reason": "",
+      "old_path": null
+    },
+    {
+      "path": "tests/test_demo_ledger.py",
+      "status": "A",
+      "added": 97,
+      "deleted": 0,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 97
+        }
+      ],
+      "reason": "",
+      "old_path": null
+    }
+  ],
+  "unreviewed": [],
+  "coverage": {
+    "ci": "无 CI 结果",
+    "ticket": "未关联需求，未做业务意图核对"
+  },
+  "confirmed": [
+    {
+      "fingerprint": "0f2feb0bb0a05c06a1c2e7e8329e2c463b782aa2384514d78726bd9b39e07554",
+      "category": "logic_error",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/fees.py",
+        "start_line": 17,
+        "end_line": 21
+      },
+      "title": "fee_tier 分支顺序错误，premium 永不返回",
+      "trigger": "调用 fee_tier(200_00)（2 万元，高于 1000 元）时，第一个条件 amount > 100_00 已成立，直接返回 \"standard\"。",
+      "consequence": "所有高于 1000 元的金额都被归为 standard，premium 档永远不可达，按档位定价/统计的逻辑全部错位。",
+      "suggestion": "先判断 amount > 1000_00 返回 premium，再判断 amount > 100_00 返回 standard。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/fees.py:16",
+          "note": "文档说明高于 1000 元为 premium"
+        },
+        {
+          "type": "test",
+          "ref": "tests/test_demo_ledger.py:55",
+          "note": "测试只覆盖 50_00 的 basic 分支，未覆盖 premium"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "fee_tier 在本次变更中被新增，文档明确约定高于 1000 元返回 premium；但第一个分支 amount > 100_00 会先命中，使 amount > 1000_00 分支永远不可达，任何超过 1000 元的金额都返回 standard，违反自身文档约定。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "if amount > 100_00: return \"standard\" elif amount > 1000_00: return \"premium\" return \"basic\"",
+      "symbol": "fee_tier",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "62d054c3f319b16ce679aaa30473d53c92d44b18e30ff0e8f673a014d7dff61d",
+      "category": "logic_error",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/fees.py",
+        "start_line": 35,
+        "end_line": 38
+      },
+      "title": "check_open 对 closed 账户抛 AccountFrozen",
+      "trigger": "check_open(Account(\"a1\", \"alice\", status=\"closed\")) 命中第一个分支 (\"closed\", \"frozen\")，抛出 AccountFrozen 而不是 AccountClosed。",
+      "consequence": "关闭账户会抛 AccountFrozen，而非文档约定的 AccountClosed，导致按 AccountClosed 捕获关闭账户的调用方不会触发。",
+      "suggestion": "先判断 status == \"closed\" 抛 AccountClosed，再判断 status == \"frozen\" 抛 AccountFrozen。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/fees.py:34",
+          "note": "文档要求 closed 抛 AccountClosed、frozen 抛 AccountFrozen"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "check_open 首先用 (closed, frozen) 抛出 AccountFrozen，使 closed 分支不可达，从而违反自身文档中 closed 应抛 AccountClosed 的约定；该函数已由 service.pay 调用。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "if account.status in (\"closed\", \"frozen\"): raise AccountFrozen(account.id) elif account.status == \"closed\": raise AccountClosed(account.id)",
+      "symbol": "check_open",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "85dce92f6457fd84486a73e32a6ff0f553ba4d0b7fba1d9773b750c06cfee541",
+      "category": "logic_error",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/fees.py",
+        "start_line": 43,
+        "end_line": 44
+      },
+      "title": "check_amount 用 and 连接互斥条件，永不拒绝",
+      "trigger": "check_amount(-100) 或 check_amount(2_000_000_00) 都不会抛 ValueError，因为 amount 不可能同时 <= 0 且 > MAX_TRANSFER。",
+      "consequence": "check_amount 已失去校验作用：非正数金额和超过 MAX_TRANSFER 的金额都会通过校验，并进入后续的 transfer_fee 与 ledger.transfer 流程，使非法金额不再被该校验点拦截。",
+      "suggestion": "改为 if amount <= 0 or amount > MAX_TRANSFER。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/fees.py:42",
+          "note": "文档要求拒绝非正数或超出上限的金额"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "check_amount 的校验条件中使用了 and，而同一金额不可能同时满足 <=0 和 >MAX_TRANSFER，因此永远不会抛出异常；这与该函数自己写明的约定相反。它在 service.py:44 中是无条件执行的校验点，且该函数是在本次变更中新增的。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "if amount <= 0 and amount > MAX_TRANSFER: raise ValueError(f\"amount out of range: {amount}\")",
+      "symbol": "check_amount",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "56a45be9eefcb4df4947f0f87f93f302a052ec94c017f4c37bc247acf7c6dc28",
+      "category": "logic_error",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/fees.py",
+        "start_line": 60,
+        "end_line": 65
+      },
+      "title": "transfer_fee 对 5000 元以下的 VIP 误免手续费",
+      "trigger": "transfer_fee(Account(\"a1\", \"alice\", vip=True), 100_00) 返回 0，而按规则应付 100 分（0.1%）。",
+      "consequence": "VIP 小额转账的手续费全部漏收，手续费收入比预期少。",
+      "suggestion": "VIP 且 amount <= VIP_FREE_ABOVE 时走与非 VIP 相同的 min(amount, max(100, amount // 1000)) 计算。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/fees.py:58-59",
+          "note": "文档说明 VIP 在该阈值及以下同样按 0.1% 收取"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "文档明确 VIP 在阈值及以下应付 0.1%（最低 1 元），但实现对所有 VIP 都返回 0，且 transfer_fee 被 service 转账流程调用，缺陷由本次新增函数引入。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "fee = 0 if account.vip: if amount > VIP_FREE_ABOVE: fee = 0 else: fee = min(amount, max(100, amount // 1000))",
+      "symbol": "transfer_fee",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "1c1412f24a17c61f5ca231ada06785820305a63fdc07b89ea61127af22337dc4",
+      "category": "logic_error",
+      "severity": "S3",
+      "location": {
+        "file": "demo/ledger/fees.py",
+        "start_line": 71,
+        "end_line": 74
+      },
+      "title": "waive_fee 提前 return，审计日志永不写入",
+      "trigger": "waive_fee(Account(\"a1\", \"alice\", vip=True), 100, audit=[]) 返回 0，但传入的 audit 列表仍为空。",
+      "consequence": "所有 VIP 减免都没有审计记录，与“每次减免都写审计日志”的约定不符，事后查不到减免来源。",
+      "suggestion": "先 audit.append(f\"waived {fee} for {account.id}\") 再 return 0。",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "demo/ledger/fees.py:72-73",
+          "note": "audit.append 位于 return 之后，属不可达代码"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "waive_fee 的文档明确承诺每次减免都会写审计，但 VIP 分支在调用 audit.append 之前就 return，因此 VIP 减免永远不会被记录。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "if account.vip: return 0 audit.append(f\"waived {fee} for {account.id}\") return fee",
+      "symbol": "waive_fee",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "51d5fc87352002f77abc2088b7c6047f32f5d2ba25a4af6baae891662390d9c7",
+      "category": "logic_error",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/fees.py",
+        "start_line": 79,
+        "end_line": 83
+      },
+      "title": "first_overdue 只检查第一张账单就返回",
+      "trigger": "bills=[已付账单, 逾期未付账单] 时，第一次迭代 paid 为 True 跳过内层判断后直接执行 return None。",
+      "consequence": "first_overdue 在首项不是逾期未付账单时会提前返回 None，漏掉其后的逾期未付账单；仓库内无调用方，催收和风控漏报无法由这段代码直接证明。",
+      "suggestion": "把 return None 移到 for 循环结束之后，只在遍历完没有匹配账单时返回 None。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/fees.py:78",
+          "note": "文档要求返回第一张逾期未付账单"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "first_overdue 中的 return None 位于 for 循环内部，首张账单未同时满足“未付且已逾期”时就直接返回，漏掉后续逾期账单，违反其返回第一张逾期未付账单的文档约定。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "for bill in bills: if not bill.paid: if bill.due < today: return bill return None",
+      "symbol": "first_overdue",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "c9cffce0d566c8988533c6214bd852a989eaf5390aac18bcff8b406a5d180555",
+      "category": "logic_error",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/fees.py",
+        "start_line": 89,
+        "end_line": 94
+      },
+      "title": "classify 对非冲正退款从不返回 refund",
+      "trigger": "classify(Txn(\"t1\", \"a1\", \"refund\", -100, \"r\")) 返回 \"normal\"；金额 >= 50000 元的退款还会返回 \"large\"。",
+      "consequence": "非冲正退款会返回 \"normal\" 或 \"large\"，而不是文档约定的 \"refund\"。",
+      "suggestion": "在 refund 分支内，reversed 返回 reversed，否则直接返回 refund，再对非退款交易判断金额。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/fees.py:87-88",
+          "note": "文档声明非冲正退款应返回 refund"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "classify 在非冲正退款时缺少返回 \"refund\"，会继续按金额返回 \"normal\" 或 \"large\"，违反函数文档约定。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "if txn.kind == \"refund\": if txn.reversed: return \"reversed\" if abs(txn.amount) >= LARGE_TXN: return \"large\" return \"normal\"",
+      "symbol": "classify",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "3cc04f754c0a3f4e056df7f8d7d68e097b6cc898cbcf152ede31b9066a98e58b",
+      "category": "logic_error",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/money.py",
+        "start_line": 10,
+        "end_line": 10
+      },
+      "title": "to_cents 经 float 转换丢失 1 分",
+      "trigger": "to_cents(\"19.99\") 返回 1998，因为 19.99 * 100 的浮点结果是 1998.9999999999998，int() 截断。",
+      "consequence": "to_cents(\"19.99\") 返回 1998，handle_pay 会按少 1 分的金额入账。",
+      "suggestion": "用 int(Decimal(text) * 100) 或对 Decimal 量化后再转 int。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/money.py:9",
+          "note": "文档要求 \"19.99\" -> 1999"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "to_cents 对 float 乘积做 int 截断，\"19.99\" 会返回 1998，docstring 却要求 1999；该函数由 handle_pay 直接以客户端金额字符串调用，且本次新增，无保护。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "return int(float(text) * 100)",
+      "symbol": "to_cents",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "79df7c4d406b0877cfcd6db9e17643c0311c71353bda96fec3e3f247bda3facc",
+      "category": "logic_error",
+      "severity": "S3",
+      "location": {
+        "file": "demo/ledger/money.py",
+        "start_line": 15,
+        "end_line": 15
+      },
+      "title": "format_cents 对负数输出错误",
+      "trigger": "format_cents(-50) 返回 \"-1.50\"，因为 -50 // 100 == -1、-50 % 100 == 50。",
+      "consequence": "负数金额（如退款）格式化后差 1 元，展示和对账文案错误。",
+      "suggestion": "用 divmod(abs(cents), 100) 后单独加负号，或直接用 Decimal 精确格式化。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/money.py:14",
+          "note": "文档要求 -50 -> \"-0.50\""
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "函数为本次新增，文档明确要求 -50 -> \"-0.50\"，但 // 和 % 对负数向下取整使 -50 得 \"-1.50\"，公开函数违反自身文档即视为可达。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "return f\"{cents // 100}.{cents % 100:02d}\"",
+      "symbol": "format_cents",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "0679e8d9534615e4bd1d9d7668e2eba6601b8e0b527cce3dd6b44895cffe2cb5",
+      "category": "error_handling",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/repo.py",
+        "start_line": 61,
+        "end_line": 63
+      },
+      "title": "get_balance 对未知账户返回 -1 而非抛 NotFound",
+      "trigger": "repo.get_balance(\"no-such-id\") 返回 -1，而同类方法 get() 对未知 id 抛 NotFound。",
+      "consequence": "statements.total_balance 会把不存在的账户按 -1 分累加，客户总资产被静默改小且无人察觉。",
+      "suggestion": "row 为 None 时 raise NotFound(account_id)，与 get() 保持一致。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/repo.py:57",
+          "note": "文档声明未知 id 与 get() 一样抛 NotFound"
+        },
+        {
+          "type": "code",
+          "ref": "demo/ledger/statements.py:11-13",
+          "note": "total_balance 直接用返回值求和，无法感知缺失账户"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "新增的 get_balance 在未知账户时返回 -1，违反自身文档约定，且 total_balance 会直接把它累加进总余额。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "if row is None: return -1 return row[0]",
+      "symbol": "get_balance",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "d833ea979534db6f9e91cba9bbc18c32b08b13378e50c593f4b7e2611ffcec9b",
+      "category": "logic_error",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/service.py",
+        "start_line": 28,
+        "end_line": 30
+      },
+      "title": "statement 未校验账户归属，登录用户可读他人流水",
+      "trigger": "statement(User(\"mallory\", authenticated=True), repo, \"alice 的 account_id\") 返回 alice 的交易列表，而不是抛 Forbidden。",
+      "consequence": "任何已登录用户只要拿到账户 id 就能读取他人账单流水，越权访问。",
+      "suggestion": "读取前校验账户 owner 与 user.id 一致，不一致时 raise Forbidden(account_id)。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/service.py:27",
+          "note": "文档要求“仅账户所有者可读，其他人抛 Forbidden”"
+        },
+        {
+          "type": "test",
+          "ref": "tests/test_demo_ledger.py:70-72",
+          "note": "测试只覆盖所有者本人读取，未覆盖非所有者"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "statement 文档明确仅限账户所有者读取，但实现只检查 authenticated，未校验 account_id 归属，已认证用户可读取任意账户流水。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "if not user.authenticated: raise Forbidden(account_id) return repo.history(account_id, sort)",
+      "symbol": "statement",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "520baaa68184f695f970c6f8b72a2db1e265b702008376d5578910ac99f51198",
+      "category": "logic_error",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/service.py",
+        "start_line": 33,
+        "end_line": 37
+      },
+      "title": "open_account 的可变默认参数在调用间共享",
+      "trigger": "连续两次不传 tags 调用 open_account(repo, \"a2\", \"bob\") 和 open_account(repo, \"a3\", \"carol\")，第二次返回的 tags 为 [\"new\", \"new\"]；若调用方显式传列表，其列表也会被就地追加 \"new\"。",
+      "consequence": "不同账户共享同一标签列表，标签串数据，并篡改调用方传入的列表。",
+      "suggestion": "默认值改为 None，函数内 tags = list(tags or []) 后再 append(\"new\")。",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "demo/ledger/service.py:33-35",
+          "note": "可变默认参数 + 就地 append"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "open_account 的可变默认参数会在缺省调用间共享列表，跨账户累积标签并就地修改调用方传入的列表，违反函数文档中 tags 属于单个账户的约定。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "def open_account(repo: Repo, account_id: str, owner: str, tags: list[str] = []) -> Account: tags.append(\"new\")",
+      "symbol": "open_account",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "37230865b5cae3b99bfc1b028ce12a09ba7d13003485b05be6b3f3a65c983fd5",
+      "category": "error_handling",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/service.py",
+        "start_line": 46,
+        "end_line": 49
+      },
+      "title": "pay 把 InsufficientFunds 包成 LedgerError，余",
+      "trigger": "handle_pay 中账户余额 100 转账 500 时，ledger.transfer 抛 InsufficientFunds（LedgerError 子类），被 pay 的 except Exception 捕获并改抛 LedgerError，handle_pay 的 except InsufficientFunds 不再命中。",
+      "consequence": "余额不足时 InsufficientFunds 被包装成 LedgerError 逃出 handle_pay，客户端拿不到 {\"ok\": false, \"reason\": \"funds\"}。",
+      "suggestion": "在 except 中把 InsufficientFunds 及 LedgerError 原样重新抛出，只包装其他异常。",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "demo/ledger/service.py:55-58",
+          "note": "handle_pay 专门捕获 InsufficientFunds 返回 reason funds"
+        },
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/service.py:42",
+          "note": "pay 文档声明余额不足时抛 InsufficientFunds"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "pay 新增的 except Exception 会把 ledger.transfer 抛出的 InsufficientFunds 包装成 LedgerError，因此 handle_pay 的 except InsufficientFunds 不再命中。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "try: ledger.transfer(account.id, dst, amount, fee) except Exception as exc: raise LedgerError(f\"payment failed: {exc}\")",
+      "symbol": "pay",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "69797a406aaf6b95fa50a8918f6638b07b828a84d82d176a876ef2aee911377a",
+      "category": "error_handling",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/service.py",
+        "start_line": 64,
+        "end_line": 68
+      },
+      "title": "charge_fee 吞掉所有异常并总是返回 ok",
+      "trigger": "ledger.withdraw 抛 NotFound 或 InsufficientFunds 时，裸 except 后仍执行到 return {\"ok\": True}。",
+      "consequence": "月费扣款失败被上报为成功，费用漏收且没有任何错误可追踪。",
+      "suggestion": "捕获具体异常并返回 {\"ok\": False, \"reason\": ...}，不要使用裸 except + pass。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/service.py:63",
+          "note": "文档要求失败时返回 ok False 和原因"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "charge_fee 由本次变更新增；裸 except 捕获并吞掉 withdraw 的 InsufficientFunds 异常后，仍返回 ok True，这直接违反了函数文档中失败时应返回 ok False 与原因的约定。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "try: ledger.withdraw(account_id, fee) except: pass return {\"ok\": True}",
+      "symbol": "charge_fee",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "bbc5c3231caee3cf51bdb5d2801676e56a042700472764259d6df7b6db36e689",
+      "category": "error_handling",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/service.py",
+        "start_line": 74,
+        "end_line": 80
+      },
+      "title": "close_account 用 finally: return 吞掉异常",
+      "trigger": "ledger.balance 抛 NotFound 或 withdraw 抛 InsufficientFunds 时，finally 中的 return paid 直接结束函数并丢弃异常。",
+      "consequence": "付款失败时异常会被静默丢弃，函数返回当前的 paid：balance 失败时为 0，withdraw 失败时为已读取的余额；同时 repo.set_status 不会执行，账户仍保持开启。",
+      "suggestion": "去掉 finally 中的 return，让异常正常抛出，只在成功路径 return paid。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/service.py:72-73",
+          "note": "文档声明付款失败时会抛出且账户保持开启"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "close_account 在 finally 中的 return paid 会吞掉 ledger.balance 抛出的 NotFound 和 ledger.withdraw 抛出的 InsufficientFunds，而函数文档明确承诺付款失败时应抛出异常并让账户保持开启。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "paid = 0 try: paid = ledger.balance(account_id) ledger.withdraw(account_id, paid) repo.set_status(account_id, \"closed\") finally: return paid",
+      "symbol": "close_account",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "d61847445c06bf8917e8696f1ebb25bc9bab8a3b6c94c24e8a54fd237e965a27",
+      "category": "logic_error",
+      "severity": "S1",
+      "location": {
+        "file": "demo/ledger/service.py",
+        "start_line": 88,
+        "end_line": 93
+      },
+      "title": "refund_card 对无幂等键的网关重试退款",
+      "trigger": "gateway.refund 首次已扣款但抛超时异常时，for 循环继续重试，最多调用网关 3 次。",
+      "consequence": "同一笔退款可能被重复发送，客户收到多笔退款，与文档“最多发一次、失败后人工重试”正好相反。",
+      "suggestion": "只调用一次网关，捕获异常后直接 raise GatewayError(\"refund failed\")，不循环重试。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/service.py:84-86",
+          "note": "文档明确网关无幂等键，退款最多发一次"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "refund_card 在文档写明网关无幂等键、退款最多发一次的情况下仍循环重试，首次已扣款但超时后会再次调用 gateway.refund，违反自身约定。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "for attempt in range(attempts): try: return gateway.refund(card, amount) except Exception: log.warning(\"refund attempt %d failed\", attempt + 1) raise GatewayError(\"refund failed\")",
+      "symbol": "refund_card",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "4be3bc12ffcb1169bb20d7a9d172664221f97830fd1941369d72239058d8ddd4",
+      "category": "logic_error",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/statements.py",
+        "start_line": 18,
+        "end_line": 18
+      },
+      "title": "totals_match 用 float 相等比较金额",
+      "trigger": "totals_match([\"0.10\", \"0.20\"], \"0.30\") 返回 False，因为 0.1 + 0.2 = 0.30000000000000004。",
+      "consequence": "对账时本应匹配的总额会被判为不平。",
+      "suggestion": "用 Decimal 求和后再与 Decimal(expected) 比较。",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "demo/ledger/statements.py:23",
+          "note": "同文件已有 Decimal 精确求和的 statement_total 可复用"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "totals_match 按文档应以十进制元金额求和比较，但用 float 等值比较，\"0.10\"+\"0.20\" 与 \"0.30\" 会因浮点误差返回 False。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "return sum(float(amount) for amount in amounts) == float(expected)",
+      "symbol": "totals_match",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "2f7f0a3daeb74d2d89da57ee58a0395a4688e7dc96f6bf8a73644344be8b4b13",
+      "category": "logic_error",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/transfers.py",
+        "start_line": 33,
+        "end_line": 36
+      },
+      "title": "withdraw 在锁外检查余额，可并发透支",
+      "trigger": "余额 1000 时两个线程同时调用 withdraw(\"a1\", 800)：都在 self.balance 检查时看到 1000 通过，随后各自在锁内减 800。",
+      "consequence": "余额变成 -600，违反“并发下余额永不为负”的声明，凭空多付钱。",
+      "suggestion": "把余额检查与扣减放进同一个 with self._lock 代码块内。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/transfers.py:31-32",
+          "note": "文档声明多线程并发提现时余额不会为负"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "withdraw 的余额检查在锁外，两个线程可同时通过检查后在锁内各扣一次，导致余额为负；该函数及其文档承诺均为本次变更新增，仓库内无其他保护。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "if self.balance(account_id) < amount: raise InsufficientFunds(account_id) with self._lock: self._balances[account_id] -= amount",
+      "symbol": "withdraw",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "b4ca3ca438beed73c7b5f386d39efe304b67a7433d5ef9e8610a2bc5846f66c0",
+      "category": "error_handling",
+      "severity": "S1",
+      "location": {
+        "file": "demo/ledger/transfers.py",
+        "start_line": 43,
+        "end_line": 51
+      },
+      "title": "transfer 抛异常时不释放锁",
+      "trigger": "transfer(\"a1\", \"a2\", amount) 因 src 余额不足抛 InsufficientFunds（或账户不存在抛 NotFound），self._lock.release() 未执行。",
+      "consequence": "失败会留下未释放的锁，其他并发请求线程再调用 transfer 会阻塞在 acquire，账本不再可供下一请求使用。",
+      "suggestion": "改用 with self._lock: 或 try/finally 保证任何路径都释放锁。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/transfers.py:41-42",
+          "note": "文档声明失败后账本仍可供下一个请求使用"
+        },
+        {
+          "type": "test",
+          "ref": "tests/test_demo_ledger.py:47-52",
+          "note": "测试只走成功路径，未覆盖失败后再次调用"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "transfer 在 NotFound/InsufficientFunds 分支抛出前已 acquire 且没有 try/finally，异常会跳过 release，违反函数文档的“失败后账本仍可用”。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "self._lock.acquire() if src not in self._balances or dst not in self._balances: raise NotFound(src if src not in self._balances else dst) if self._balances[src] < amount: raise InsufficientFunds(src)",
+      "symbol": "transfer",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "ade357fe1a29c284ddb63162b3b38dd9a2e642d660fbb237abec6e9d71099ace",
+      "category": "logic_error",
+      "severity": "S2",
+      "location": {
+        "file": "demo/ledger/tokens.py",
+        "start_line": 36,
+        "end_line": 39
+      },
+      "title": "rate_client 无锁，可创建多个会话",
+      "trigger": "两个请求线程同时首次调用 rate_client()，都在 _client is None 判断处进入并各自 new RateClient，RateClient.opened 变成 2。",
+      "consequence": "进程内出现两个 FX 会话，违反服务“每进程只允许一个会话”的限制，可能被服务端拒绝。",
+      "suggestion": "用模块级 threading.Lock 保护首次初始化。",
+      "evidence": [
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/tokens.py:35",
+          "note": "文档说明该方法被每个请求线程调用"
+        },
+        {
+          "type": "docstring",
+          "ref": "demo/ledger/tokens.py:22",
+          "note": "RateClient 文档说明服务每进程只允许一个会话"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "该函数是本次变更新增的，文档明确说明它会从每个请求线程调用；首次并发进入时，未加锁的 check-then-act 会创建多个 RateClient 实例，违反每进程一个会话的约定。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "global _client if _client is None: _client = RateClient() return _client",
+      "symbol": "rate_client",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    },
+    {
+      "fingerprint": "903399c30565eac843981bac61189da477950f1f74c58fcb543c63499e424538",
+      "category": "logic_error",
+      "severity": "S3",
+      "location": {
+        "file": "demo/ledger/tokens.py",
+        "start_line": 45,
+        "end_line": 48
+      },
+      "title": "save_statement 先查后写，可覆盖共享目录文件",
+      "trigger": "两个导出任务同时用同一 path 调用 save_statement：都通过 os.path.exists 检查，随后各自 open(path, \"w\") 互相覆盖。",
+      "consequence": "声明“绝不覆盖已有文件”的导出会被静默覆盖，丢失一份对账单。",
+      "suggestion": "与同文件的 save_receipt 一致，用 os.open(path, O_WRONLY | O_CREAT | O_EXCL) 原子创建。",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "demo/ledger/tokens.py:51-55",
+          "note": "save_receipt 已用 O_EXCL 实现同一语义，可对照"
+        }
+      ],
+      "verification": {
+        "verdict": "confirmed",
+        "checked": [
+          "path_reachable",
+          "existing_protection",
+          "introduced_in_this_change",
+          "consequence_exaggerated"
+        ],
+        "reason": "函数文档明确说明导出目录与其他任务共享；在并发场景下，os.path.exists 检查与 open(path, \"w\") 之间存在 TOCTOU 竞态，无法保证“绝不覆盖已有文件”。"
+      },
+      "introduced_in": "this_change",
+      "snippet": "if os.path.exists(path): raise FileExistsError(path) with open(path, \"w\", encoding=\"utf-8\") as fh: fh.write(text)",
+      "symbol": "save_statement",
+      "level": "must_fix",
+      "replacement": null,
+      "edits": [],
+      "equivalence": "",
+      "performance_note": "",
+      "locked_by": []
+    }
+  ],
+  "rejected": [],
+  "undecided": [],
+  "summary": {
+    "s1_undecided_pending_human": [],
+    "note": "没有待人工确认的 S1 未判定项。S2/S3 未判定不进入确认列表，但仍落盘。"
+  },
+  "elapsed_seconds": 113.613,
+  "tokens": {
+    "prompt_tokens": 53781,
+    "completion_tokens": 34743,
+    "total": 88524
+  },
+  "cost": 0.0,
+  "budget_exhausted": false,
+  "partial_reasons": [],
+  "dropped": [],
+  "error": null,
+  "reused": false,
+  "policy_source": "base",
+  "policy_note": "correctness=开启:must_fix、secrets=开启:must_fix、performance=关闭:recommend、security=关闭:must_fix、compatibility=关闭:must_fix、simplicity=关闭:must_fix",
+  "fail_on_must_fix": false,
+  "fail_check": false,
+  "fail_reasons": [],
+  "complexity": {
+    "net_added": 644,
+    "new_files": [
+      "demo/ledger/__init__.py",
+      "demo/ledger/db.py",
+      "demo/ledger/errors.py",
+      "demo/ledger/fees.py",
+      "demo/ledger/models.py",
+      "demo/ledger/money.py",
+      "demo/ledger/reconcile.py",
+      "demo/ledger/repo.py",
+      "demo/ledger/service.py",
+      "demo/ledger/statements.py",
+      "demo/ledger/tokens.py",
+      "demo/ledger/transfers.py"
+    ],
+    "new_symbols": [
+      "connect",
+      "session",
+      "LedgerError",
+      "InsufficientFunds",
+      "AccountFrozen",
+      "AccountClosed",
+      "NotFound",
+      "DuplicateAccount",
+      "Forbidden",
+      "GatewayError",
+      "fee_tier",
+      "daily_limit",
+      "check_open",
+      "check_amount",
+      "channel_fee",
+      "transfer_fee",
+      "waive_fee",
+      "first_overdue",
+      "classify",
+      "can_withdraw",
+      "Account",
+      "Txn",
+      "Bill",
+      "User",
+      "to_cents",
+      "format_cents",
+      "yuan",
+      "match",
+      "missing",
+      "low_balances",
+      "top_movers",
+      "monthly_summary",
+      "duplicates",
+      "Repo",
+      "_memo_filter",
+      "CardGateway",
+      "mask",
+      "statement",
+      "open_account",
+      "pay",
+      "handle_pay",
+      "charge_fee",
+      "close_account",
+      "refund_card",
+      "total_balance",
+      "totals_match",
+      "statement_total",
+      "account_count",
+      "token_matches",
+      "signature_ok",
+      "RateClient",
+      "rate_client",
+      "save_statement",
+      "save_receipt",
+      "Ledger"
+    ],
+    "single_use": [
+      "fee_tier",
+      "daily_limit",
+      "channel_fee",
+      "waive_fee",
+      "first_overdue",
+      "classify",
+      "can_withdraw",
+      "format_cents",
+      "low_balances",
+      "top_movers",
+      "monthly_summary",
+      "duplicates",
+      "_memo_filter",
+      "CardGateway",
+      "mask",
+      "statement",
+      "open_account",
+      "pay",
+      "handle_pay",
+      "charge_fee",
+      "close_account",
+      "refund_card",
+      "total_balance",
+      "totals_match",
+      "statement_total",
+      "account_count",
+      "token_matches",
+      "signature_ok",
+      "rate_client",
+      "save_statement",
+      "save_receipt"
+    ],
+    "new_env_reads": 0,
+    "exceeded": [],
+    "complete": true
+  }
+}
