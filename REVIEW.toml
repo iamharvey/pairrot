@@ -12,8 +12,12 @@ level = "must_fix"
 enabled = true
 level = "must_fix"
 
+[security]
+enabled = true
+level = "must_fix"
+
 [performance]
-enabled = false
+enabled = true
 level = "recommend"
 
 # [[extra]]
