@@ -282,7 +282,7 @@ def verify_findings(
             ChatMessage(role="user", content=user),
         ]
         try:
-            completion = llm.complete(messages, None, model=model)
+            completion = llm.complete(messages, model=model)
         except Exception as exc:
             tracker.set_error(str(exc))
             stopped.set()

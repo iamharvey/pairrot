@@ -1,3 +1,3 @@
-"""pairrot phase 1: local correctness review."""
+"""pairrot: code review that verifies each finding before it is posted."""
 
 __version__ = "0.1.0"

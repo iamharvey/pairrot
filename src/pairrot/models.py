@@ -22,7 +22,7 @@ class Category(str, Enum):
     complexity = "complexity"
 
 
-# Correctness perspective only. Other whitelist categories are dropped in phase 1.
+# The categories reviewed when the base has no REVIEW.toml.
 CORRECTNESS_CATEGORIES = frozenset({Category.logic_error, Category.error_handling})
 
 CATEGORY_FROM_LABEL: dict[str, Category] = {

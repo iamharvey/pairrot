@@ -193,8 +193,8 @@ def facts_for(facts: str, path: str) -> str:
 
     Truncated facts always come back with the marker, because a missing row then means "not counted", not "no references".
     """
-    path = norm_path(path)
-    rows = [row for row in facts.splitlines() if row.startswith("- ") and path in row]
+    mentioned = re.compile(rf"(?<![\w./-]){re.escape(norm_path(path))}(?=[ :])")
+    rows = [row for row in facts.splitlines() if row.startswith("- ") and mentioned.search(row)]
     if is_complete(facts):
         return "\n".join([HEADER, *rows]) if rows else ""
     return "\n".join([HEADER, *rows, TRUNCATED])

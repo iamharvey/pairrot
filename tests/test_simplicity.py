@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from pairrot.cli import exit_code
-from pairrot.facts import design_facts, facts_for
+from pairrot.facts import HEADER, design_facts, facts_for
 from pairrot.llm import ChatMessage, Completion, FakeModel
 from pairrot.models import (
     Budget,
@@ -185,6 +185,42 @@ def test_verifier_sees_the_facts_for_design_candidates_only():
     assert "helper：0 处" not in context(Category.logic_error)
 
 
+def test_facts_for_matches_the_path_not_a_substring():
+    facts = "\n".join(
+        [
+            HEADER,
+            "- api.py helper：0 处",
+            "- rest_api.py other：1 处（rest_api.py:3）",
+            "- app/api.py nested：2 处",
+            "- api.pyi stub：0 处",
+            "- fmt.py subject：旧 `def subject(n):`，新 `def subject(n, locale):`。head 全仓调用点：api.py:7: subject(x)",
+        ]
+    )
+    related = facts_for(facts, "api.py")
+    assert "helper" in related and "subject" in related
+    assert "rest_api" not in related and "nested" not in related and "stub" not in related
+
+
+def test_a_pure_deletion_on_the_diff_suggests_an_empty_block():
+    finding = Finding(
+        fingerprint="d",
+        category=Category.complexity,
+        severity=Severity.S3,
+        location=Location(file="a.py", start_line=3, end_line=4),
+        title="没有调用方的函数",
+        trigger="unused 没有调用方",
+        replacement="",
+        equivalence="没有调用方，删除不改变任何行为",
+        performance_note="少一个函数",
+        verification=Verification(verdict=Verdict.confirmed, checked=[], reason="成立"),
+        introduced_in=IntroducedIn.this_change,
+        level="must_fix",
+    )
+    [comment] = plan_publication(_report([finding]), {"a.py": {3, 4}}, set()).inline
+    assert (comment.start_line, comment.line) == (3, 4)
+    assert "```suggestion\n```" in comment.body
+
+
 def test_imported_modules_reads_plain_and_from_imports():
     code = "import collections, os.path as p\nfrom itertools import groupby\nfrom . import local\nimport requests\n"
     assert imported_modules(code) == {"collections", "os", "itertools", "requests"}
@@ -194,7 +230,7 @@ def test_simplifications_are_gated_locked_and_leveled(tmp_path: Path):
     repo, base, tip = _repo(tmp_path, _TOML)
     verified: list[str] = []
 
-    def handler(messages, tools, model):
+    def handler(messages, model):
         system = messages[0].content or ""
         if "独立验证" in system:
             payload = messages[1].content or ""
