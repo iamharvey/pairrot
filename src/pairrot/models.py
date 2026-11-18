@@ -19,6 +19,7 @@ class Category(str, Enum):
     error_handling = "error_handling"
     security = "security"
     performance = "performance"
+    complexity = "complexity"
 
 
 # Correctness perspective only. Other whitelist categories are dropped in phase 1.
@@ -33,6 +34,7 @@ CATEGORY_FROM_LABEL: dict[str, Category] = {
     "错误处理缺失": Category.error_handling,
     "安全与权限": Category.security,
     "性能后果": Category.performance,
+    "不必要的复杂度": Category.complexity,
 }
 
 OUT_OF_WHITELIST_LABEL = "白名单外"
@@ -153,6 +155,11 @@ class Finding(BaseModel):
     snippet: str = ""
     symbol: str = "unknown"
     level: str = ""
+    replacement: str | None = None
+    edits: list[str] = Field(default_factory=list)
+    equivalence: str = ""
+    performance_note: str = ""
+    locked_by: list[str] = Field(default_factory=list)
 
 
 class LineRange(BaseModel):
@@ -220,6 +227,19 @@ class ReportSummary(BaseModel):
     note: str = ""
 
 
+class ComplexityStats(BaseModel):
+    """Counted from git without a model. Test files are left out."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    net_added: int = 0
+    new_files: list[str] = Field(default_factory=list)
+    new_symbols: list[str] = Field(default_factory=list)
+    single_use: list[str] = Field(default_factory=list)
+    new_env_reads: int = 0
+    exceeded: list[str] = Field(default_factory=list)
+
+
 class RunReport(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -250,6 +270,8 @@ class RunReport(BaseModel):
     policy_note: str = ""
     fail_on_must_fix: bool = False
     fail_check: bool = False
+    fail_reasons: list[str] = Field(default_factory=list)
+    complexity: ComplexityStats | None = None
 
 
 _SYMBOL_PATTERNS: tuple[re.Pattern[str], ...] = (

@@ -44,6 +44,13 @@ flowchart LR
 
    每条证据都带来源、版本和是否完整。验证者核对四点：路径能否发生、是否已有保护、是否本次引入、后果有没有说大。结论只有 `confirmed`、`rejected`、`undecided` 三种，只有 `confirmed` 会发到 PR。
 5. **密钥扫描**：新增行里的疑似密钥由确定性规则识别，不经过模型。报告和评论里只写变量名，值一律显示为 `[REDACTED]`。
+6. **设计轮与简化门禁**（打开 `[compatibility]` 或 `[simplicity]` 时）：契约和简化单独跑一轮评审，和第 2 步并行。这一轮附带一份用 git 算出的事实：签名变化的函数和它们在 head 的调用点、新增函数和类的引用数、与已有函数实现相同的新函数、新增布尔常量的赋值和读取处。验证者拿到同一份事实里与候选文件相关的条目。简化建议进验证者之前，先用确定性规则过一遍：
+   - 落在扩展点上的丢弃；
+   - 替换代码引入了项目没声明的依赖的直接驳回；
+   - 替换代码是一整个函数、标的行号却只覆盖一部分时，范围扩到整个函数；
+   - 把替换拼进 head 文件后用 `ast` 解析（只解析，不执行），解析失败，或者删掉的顶层名字在别处仍被使用的，直接驳回；
+   - 用 `git grep` 找 head 上提到这个函数的测试文件，作为“锁定测试”。
+7. **复杂度统计**：不调模型，从 diff 里数净增行数、新文件、新增类和函数、全仓只用一次的新符号、新增环境变量读取，写进摘要；`[complexity_budget]` 设了上限就按上限把关。
 
 ### 原则
 
@@ -62,7 +69,7 @@ flowchart LR
 | | pairrot | Open Code Review |
 |---|---|---|
 | 评审方式 | 固定流程：切片评审 → 按需查询 → 独立验证 | Agent 式：模型多轮调用工具读代码，最后由 LLM 过滤 |
-| 默认范围 | 逻辑错误、错误处理缺失（可在 `REVIEW.toml` 打开安全、性能） | 更宽，含安全、性能、并发等 |
+| 默认范围 | 逻辑错误、错误处理缺失（可在 `REVIEW.toml` 打开安全、性能、跨模块契约、不必要的复杂度） | 更宽，含安全、性能、并发等 |
 | 误报控制 | 独立验证者 + 有来源和版本的证据包；证据不足时判未判定 | LLM 后过滤（`--no-filter` 可关） |
 | 密钥 | 确定性规则扫描新增行，报告和评论里不出现原值 | 由模型发现 |
 | 规则 | `REVIEW.toml`，只从 base 读取 | `rule.json` |
@@ -100,6 +107,35 @@ flowchart LR
 
 只开默认的正确性视角时，pairrot 每轮命中 18 个，SQL 注入和性能问题为 0；打开两个视角后 token 约增加 50%。三轮里漏掉的主要是 N+1 查询、`==` 比较令牌（验证者以“只有测试调用”驳回过一次），以及偶发的一个嵌套或竞态问题。`[performance]` 默认是 `recommend`，这些意见只进摘要，不挂行内。
 
+第三个样本 `demo/notify` 是一个通知服务，专门测“故意不兼容”和“不必要的复杂度”。它预埋了 14 个缺陷：标准库能替代的手写代码 4 个、多余的重试和原样重抛 2 个、只转发的包装和没人用的别名 3 个、没人传的参数和单实现的策略工厂 2 个、恒为真的开关后面的死分支 1 个、重复实现已有函数 1 个、改了签名但调用方没跟着改 1 个。另有 10 处诱饵：
+
+- 仓库内调用方已同步修改的故意不兼容；
+- 仍有旧格式数据要读的兼容代码；
+- 换成标准库后行为会变的手写实现（带过期时间的缓存、保留最后出现位置的去重、能处理引号里分号的解析）；
+- 声明为扩展点的基类；
+- 有人在传的参数；
+- 网络调用上的重试。
+
+pairrot 在 base 的 `REVIEW.toml` 里打开了 `[compatibility]` 和 `[simplicity]`，其余条件同上，每个工具跑 3 次。除了数命中，还把每个工具给出的修改建议逐条应用到 demo 的副本上，再跑行为锁定测试和计时，看采纳后会不会坏：
+
+| | pairrot（v11） | Open Code Review 1.13.10 | PR-Agent 0.50.0 |
+|---|---|---|---|
+| 命中预埋缺陷（共 14 个） | 6–8 | 8–10 | 1–3 |
+| 落到诱饵上的意见 | 0 | 2–3 | 1–2 |
+| 能直接应用的修改建议 | 每轮 1–4 条，共 7 条 | 每轮 5–9 条，共 23 条（另有 4 条对不上原代码） | 每轮 3 条，共 9 条 |
+| 采纳后测试失败或明显变慢 | 0 | 6 | 0 |
+| 每轮 token | 10–15 万 | 55–74 万 | 5–7 万 |
+| 每轮耗时 | 170–300 秒 | 138–172 秒 | 约 160–180 秒 |
+
+“明显变慢”指比原代码慢 20% 以上，并且多出 3 毫秒以上。诱饵 X07（头部解析）的代码里其实有一个真实 bug：没加引号的值里出现撇号，会吞掉后面的字段。三个工具都报了它，上表没有把这条算作误报。
+
+**怎么理解这组数字：**
+
+- OCR 召回最高，但它的修改建议里有 6 条采纳后会出问题，原因有三类：把带过期时间的缓存换成 `lru_cache`、删掉仍在用的函数或参数、替换代码和原代码行号对不上导致模块导入失败。pairrot 能直接应用的建议更少，但采纳后都没有退化。
+- pairrot 漏掉的主要是：手写 memo 缓存（替换时容易丢掉缓存）、给纯函数加重试、给没人写的旧字段留的兜底，以及先判断再建目录。最后一条验证者认为不等价：路径是普通文件时，原代码直接返回，`os.makedirs(exist_ok=True)` 会报错。
+- 这一版之前，验证者看不到事实，也不认“仓库内没人用的兼容别名可以删”，每轮只命中 3–5 个；替换代码和行号对不上的建议也会被确认，采纳后有 4 条让模块导入失败。现在这两类问题分别由事实、拼接检查和验证者口径处理。
+- 要同时改多处的简化（例如删掉重复实现并把调用点改成已有函数）只作为参考出现在摘要里，不阻断合并。模型有时也会把单处就能完成的简化写成多处改动，这时级别会从 `must_fix` 降为 `recommend`。
+
 ## 安装
 
 需要 Python 3.11 或以上、git 2.x，以及一个 OpenAI 兼容的模型接口。
@@ -134,7 +170,7 @@ pairrot review --repo . --base origin/main --head HEAD --out pairrot-out
 # status=passed check=ok report=pairrot-out/report.json reused=false
 ```
 
-退出码：状态为 `failed`，或者 `REVIEW.toml` 要求“存在必须处理的意见即失败”且确有这类意见时，返回 1；其他情况返回 0。
+退出码：状态为 `failed`，或者 check 应当失败（`fail_on_must_fix = true` 且确有必须处理的意见，或超出 `[complexity_budget]`）时，返回 1；其他情况返回 0。加 `--defer-check` 时只在运行失败时返回 1。
 
 ### 环境变量
 
@@ -193,7 +229,7 @@ name: pairrot review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -201,10 +237,12 @@ permissions:
 
 concurrency:
   group: pairrot-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  # 只有新提交取消正在跑的评审，标签触发的运行排队等待
+  cancel-in-progress: ${{ github.event.action == 'synchronize' }}
 
 jobs:
   review:
+    # 不要按标签名在 job 上加 if：被跳过的 job 算通过，会盖掉失败的 check
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -217,6 +255,12 @@ jobs:
           python-version: "3.12"
 
       - run: pip install "git+https://github.com/iamharvey/pairrot.git@<commit-sha>"
+
+      # 任何标签变化都会在同一个 head 上重跑，缓存的报告直接复用，不再调模型
+      - uses: actions/cache/restore@v4
+        with:
+          path: pairrot-out/runs
+          key: pairrot-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
 
       - name: Review
         id: review
@@ -231,6 +275,14 @@ jobs:
           --base ${{ github.event.pull_request.base.sha }}
           --head ${{ github.event.pull_request.head.sha }}
           --out pairrot-out
+          --defer-check
+
+      - uses: actions/cache/save@v4
+        if: always()
+        continue-on-error: true
+        with:
+          path: pairrot-out/runs
+          key: pairrot-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
 
       - name: Publish
         id: publish
@@ -242,12 +294,14 @@ jobs:
         run: >
           pairrot publish github --report pairrot-out/report.json
           --pr ${{ github.event.pull_request.number }}
+          ${{ github.event.action == 'synchronize' && '--new-commits' || '' }}
 
-      - name: Fail the check when review or publish failed
+      - name: Fail the check
         if: always()
         run: |
-          test "${{ steps.review.outcome }}" = "success"
-          test "${{ steps.publish.outcome }}" = "success"
+          test "${{ steps.review.outcome }}" = "success" || { echo "评审运行失败"; exit 1; }
+          test "${{ steps.publish.outcome }}" = "success" || { echo "发布评论失败"; exit 1; }
+          test "${{ steps.publish.outputs.check }}" != "failed" || { echo "存在必须处理的意见"; exit 1; }
 ```
 
 需要注意：
@@ -255,6 +309,9 @@ jobs:
 - 在仓库的 Settings → Secrets and variables → Actions 里添加 `PAIRROT_BASE_URL`、`PAIRROT_API_KEY`、`PAIRROT_MODEL`。
 - 触发事件用 `pull_request`，**不要**改成 `pull_request_target`。这样来自 fork 的 PR 拿不到 secrets，评审会失败，而不是在拿到写权限的情况下运行不受信任的代码。
 - 评审即使失败也会发布摘要（`continue-on-error` 加 `if: always()`），最后一步再让 check 按实际结果失败。
+- `--defer-check` 让评审步骤只在运行失败时返回非零，意见是否挡住合并交给发布步骤判断，因为只有发布步骤能看到 PR 标签。
+- **人工放行**：确认是误报时，有写权限的人给 PR 加 `pairrot-override` 标签，check 会在同一个 head 上重跑并通过，摘要里写明是谁放行的，意见照常展示。放行只对当前 head 有效：推新提交时发布步骤会删掉这个标签，需要重新确认。新提交的运行会取消正在跑的评审，标签触发的运行则排队等它跑完，所以在新 head 评审完成前加的标签会先被删掉，不会被算到维护者没看过的提交上。
+- 任何标签变化都会重跑整个 job，而不是只在 `pairrot-override` 上运行。GitHub 把被跳过的 job 当作通过，如果按标签名跳过，给失败的 PR 随便加一个标签就会让 check 变绿。重跑命中缓存，不会再调模型。
 
 ### GitLab CI
 
@@ -339,7 +396,7 @@ sonar-scanner \
 |---|---|---|
 | 行内 | `must_fix` 级别的意见 | S1 全部、S2 最多 5 条 |
 | 只在摘要里 | `recommend` 级别的意见 | S3，以及超出名额的 S2 |
-| check 结果 | `fail_on_must_fix = true` 且存在 `must_fix` 时失败 | 只在运行失败时失败 |
+| check 结果 | `fail_on_must_fix = true` 且存在 `must_fix`，或超出 `[complexity_budget]` 时失败；`pairrot-override` 标签可放行当前 head | 只在运行失败时失败 |
 
 不在本次 diff 可评论行上的意见会放进摘要，并标明原因。
 
@@ -356,6 +413,8 @@ sonar-scanner \
 | `partial_reasons` / `error` | 为什么是 `partial`，出了什么错 |
 | `coverage` | 需求与 CI 是否参与审查 |
 | `tokens` / `elapsed_seconds` / `reused` | 用量、耗时、是否复用了旧报告 |
+| `fail_check` / `fail_reasons` | check 是否应当失败，以及原因 |
+| `complexity` | 复杂度统计和超出的预算项 |
 
 ```bash
 jq '.confirmed[] | {file: .location.file, line: .location.start_line, title, reason: .verification.reason}' pairrot-out/report.json
@@ -390,12 +449,40 @@ level = "must_fix"
 enabled = true
 level = "recommend"
 
+[compatibility]                  # 不兼容默认是故意的，只把 stable 里的路径当外部契约
+enabled = true                   # 打开后报 contract_break：仓库内还有按旧约定使用的位置，或破坏了稳定接口
+level = "must_fix"
+stable = ["api/*", "proto/*"]
+allow_break = []                 # 要在稳定路径上做一次故意的破坏，先把路径加到这里并合进主干
+
+[simplicity]                     # 不必要的复杂度：必须给出替换代码，并说明行为和性能不变
+enabled = true
+level = "must_fix"               # 只对有测试锁定的意见生效，没有测试的一律 recommend
+extension_points = ["plugins/*"] # 故意留的扩展点，不报“只有一个实现”
+
+[complexity_budget]              # 不调模型的复杂度统计，设了哪项就按哪项把关
+max_net_added = 800
+max_single_use = 10
+
 [[extra]]                        # 追加给评审模型的团队规则，可以写多条
 enabled = true
 instruction = "如果新增的外部调用没有超时，报 error_handling，并写明哪个调用会一直挂住。"
 ```
 
 `[[extra]]` 只能让模型在已开启的类别里多注意某类问题，产出的发现仍然要过类别白名单和独立验证。所以写规则时要说明归到哪个类别，否则会被丢弃。
+
+### 故意不兼容与简化
+
+模型评审容易往两个方向把代码推复杂：建议为旧数据、旧调用方加兼容层，以及接受 AI 生成代码里多余的抽象和兜底。pairrot 对这两件事的处理：
+
+- **不兼容默认是故意的**。无论开不开 `[compatibility]`，评审意见的建议都不会提议兼容层、兜底分支、旧字段别名或双读双写，“没有兼容旧数据”本身也不算缺陷。只有两种情况会报 `contract_break`：改了约定但 head 上仓库里仍有按旧约定使用的位置（验证者要在调用方证据里看到它），或者改动落在 `stable` 列出的路径上。声明只认 base 上的 `REVIEW.toml`，PR 描述里写的不算。
+- **简化要能直接采纳**。`[simplicity]` 打开后，每条 `complexity` 意见必须带三样东西：替换后的代码、逐项的行为等价说明（空输入、None、异常类型、顺序、边界值、副作用）、性能说明，缺一样直接丢弃。替换的来源按优先级是标准库、项目已有依赖、仓库里已有的函数、直接删除；不允许为了简化引入新依赖。函数长度、嵌套深度、命名这类没有替换代码的意见仍然不报。
+- **要改多处的简化只作参考**。比如删掉重复实现并把调用点改成已有函数，一段替换代码表达不了。这种意见不带替换代码，改为列出每一处要改的位置，固定为 `recommend`，只进摘要，不阻断合并。
+- **验证者过三道关**：
+  - 等价：任何一种允许的输入行为不同就驳回。只比较仓库里实际存在的调用方式，删掉没人传的参数后，“传了会报 TypeError”不算不等价。
+  - 性能：复杂度量级、IO、查询次数不能变差。
+  - 删除安全：调用方证据和事实里没有其他使用者，没有反射、字符串注册或 `__all__` 导出。注释写着“给旧调用方用”不算对外导出；不在 `stable` 路径上、仓库内没人用的兼容别名可以删。
+- **级别看测试锁定**。pairrot 不运行仓库里的测试，它用 `git grep` 查 head 上有没有测试文件提到这个函数。有就按 `[simplicity].level` 处理，评论里列出这些测试，采纳后由仓库自己的 CI 确认不退化；没有就降为 `recommend`，提示先补测试再简化。能整段替换时评论里是 GitHub 的 suggestion 块，可以一键采纳。
 
 ### 调预算
 

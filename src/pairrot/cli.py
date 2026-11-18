@@ -58,11 +58,13 @@ def _cmd_review(args: argparse.Namespace) -> int:
         f"status={report.status.value} check={'failed' if report.fail_check else 'ok'} "
         f"report={Path(args.out) / 'report.json'} reused={str(report.reused).lower()}"
     )
-    return exit_code(report)
+    return exit_code(report, defer_check=args.defer_check)
 
 
-def exit_code(report) -> int:
-    if report.status.value == "failed" or report.fail_check:
+def exit_code(report, *, defer_check: bool = False) -> int:
+    if report.status.value == "failed":
+        return 1
+    if report.fail_check and not defer_check:
         return 1
     return 0
 
@@ -92,8 +94,18 @@ def _cmd_replay(args: argparse.Namespace) -> int:
 
 
 def _cmd_publish(args: argparse.Namespace) -> int:
-    planned = publish_from_env(args.report, args.pr, repository=args.repository, token=args.token)
-    print(f"inline={len(planned.inline)} summary=updated")
+    planned = publish_from_env(
+        args.report,
+        args.pr,
+        repository=args.repository,
+        token=args.token,
+        new_commits=args.new_commits,
+    )
+    print(f"inline={len(planned.inline)} summary=updated check={planned.check}")
+    output = os.environ.get("GITHUB_OUTPUT")
+    if output:
+        with open(output, "a", encoding="utf-8") as handle:
+            handle.write(f"check={planned.check}\n")
     return 0
 
 
@@ -121,6 +133,11 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--ci", help="Local CI JSON. Missing means a coverage gap")
     review.add_argument("--cost-cap", type=float, default=None, help="Unset means uncapped")
     review.add_argument("--verifier-model", default=None)
+    review.add_argument(
+        "--defer-check",
+        action="store_true",
+        help="Exit 0 on must_fix findings and leave the check to publish, which honors the override label",
+    )
     review.set_defaults(func=_cmd_review)
 
     evaluation = sub.add_parser("eval", help="Import the audit workbook or replay datasets")
@@ -146,6 +163,11 @@ def build_parser() -> argparse.ArgumentParser:
     github.add_argument("--pr", required=True, type=int)
     github.add_argument("--repository", default=None, help="Defaults to GITHUB_REPOSITORY")
     github.add_argument("--token", default=None, help="Defaults to GITHUB_TOKEN")
+    github.add_argument(
+        "--new-commits",
+        action="store_true",
+        help="The head moved. Remove the override label so it must be applied to this head again",
+    )
     github.set_defaults(func=_cmd_publish)
 
     export = sub.add_parser("export", help="Render a report as Markdown or SonarQube external issues")

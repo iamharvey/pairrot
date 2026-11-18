@@ -2,17 +2,20 @@ name: pairrot review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
   pull-requests: write
 
+# Only new commits cancel a running review. A label run waits, so the run for a new head removes
+# the override label before any label run can apply it to that head.
 concurrency:
   group: pairrot-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event.action == 'synchronize' }}
 
 jobs:
+  # No job-level filter on the label name. A skipped job reports success and would replace a failing check.
   review:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -27,6 +30,13 @@ jobs:
 
       - name: Install pairrot
         run: pip install .
+
+      # Any label change reruns the job on the same head. The cached report is reused instead of reviewing again.
+      - name: Restore earlier reports
+        uses: actions/cache/restore@v4
+        with:
+          path: pairrot-out/runs
+          key: pairrot-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
 
       - name: Review the pull request
         id: review
@@ -45,6 +55,15 @@ jobs:
           --base ${{ github.event.pull_request.base.sha }}
           --head ${{ github.event.pull_request.head.sha }}
           --out pairrot-out
+          --defer-check
+
+      - name: Save reports
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: pairrot-out/runs
+          key: pairrot-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
 
       - name: Publish review comments
         id: publish
@@ -57,9 +76,11 @@ jobs:
           pairrot publish github
           --report pairrot-out/report.json
           --pr ${{ github.event.pull_request.number }}
+          ${{ github.event.action == 'synchronize' && '--new-commits' || '' }}
 
-      - name: Fail the check when review or publish failed
+      - name: Fail the check when review, publish, or a must_fix finding failed
         if: always()
         run: |
-          test "${{ steps.review.outcome }}" = "success"
-          test "${{ steps.publish.outcome }}" = "success"
+          test "${{ steps.review.outcome }}" = "success" || { echo "评审运行失败"; exit 1; }
+          test "${{ steps.publish.outcome }}" = "success" || { echo "发布评论失败"; exit 1; }
+          test "${{ steps.publish.outputs.check }}" != "failed" || { echo "存在必须处理的意见，见 pairrot 摘要；确认是误报可加 pairrot-override 标签放行"; exit 1; }

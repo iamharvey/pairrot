@@ -1,0 +1,19 @@
+{
+  "sample": "demo/shop PR #5, base 82fe32e, head 237f52f, deepseek-v4-flash",
+  "pairrot": "phase1-correctness-v5: empty follow-up keeps first-pass findings, withdrawals recorded, errored runs not reused",
+  "scored_by": "agent against benchmark/shop_answer_key.jsonl; v5c C02 match is D02 (line off by 4)",
+  "rounds": [
+    {"files": "pairrot_v5a", "verify": "serial", "secs": 320, "tokens": 92481,
+     "confirmed": ["D01", "D03", "D04", "D06", "D07", "D08", "D09", "D11", "D12", "D13", "D14", "D15", "D16", "D20", "D21"],
+     "undecided": ["D02", "D05", "D10", "D18"], "missed": ["D17", "D19"], "decoy_hits": []},
+    {"files": "pairrot_v5b", "verify": "serial", "secs": 375, "tokens": 102383,
+     "confirmed": ["D01", "D03", "D04", "D05", "D06", "D07", "D08", "D09", "D10", "D12", "D13", "D15", "D16", "D20", "D21"],
+     "undecided": ["D02", "D11", "D14", "D18"], "missed": ["D17", "D19"], "decoy_hits": []},
+    {"files": "pairrot_v5c", "verify": "serial", "secs": 386, "tokens": 99971,
+     "confirmed": ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D11", "D12", "D13", "D14", "D15", "D20", "D21"],
+     "undecided": ["D08", "D10", "D16", "D18"], "missed": ["D09", "D17", "D19"], "decoy_hits": []},
+    {"files": "pairrot_par1", "verify": "parallel x4", "secs": 144, "tokens": 96215,
+     "confirmed": ["D01", "D02", "D04", "D05", "D06", "D10", "D11", "D13", "D14", "D15", "D16", "D20", "D21"],
+     "undecided": ["D03", "D08", "D12", "D18"], "missed": ["D07", "D09", "D17", "D19"], "decoy_hits": []}
+  ]
+}
