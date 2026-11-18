@@ -8,15 +8,15 @@ permissions:
   contents: read
   pull-requests: write
 
+# Only new commits cancel a running review. A label run waits, so the run for a new head removes
+# the override label before any label run can apply it to that head.
 concurrency:
   group: pairrot-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event.action == 'synchronize' }}
 
 jobs:
+  # No job-level filter on the label name. A skipped job reports success and would replace a failing check.
   review:
-    if: >-
-      (github.event.action != 'labeled' && github.event.action != 'unlabeled')
-      || github.event.label.name == 'pairrot-override'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -31,7 +31,7 @@ jobs:
       - name: Install pairrot
         run: pip install .
 
-      # A label change reruns the job on the same head. The cached report is reused instead of reviewing again.
+      # Any label change reruns the job on the same head. The cached report is reused instead of reviewing again.
       - name: Restore earlier reports
         uses: actions/cache/restore@v4
         with:

@@ -237,14 +237,12 @@ permissions:
 
 concurrency:
   group: pairrot-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  # 只有新提交取消正在跑的评审，标签触发的运行排队等待
+  cancel-in-progress: ${{ github.event.action == 'synchronize' }}
 
 jobs:
   review:
-    # 标签变化只在 pairrot-override 上触发
-    if: >-
-      (github.event.action != 'labeled' && github.event.action != 'unlabeled')
-      || github.event.label.name == 'pairrot-override'
+    # 不要按标签名在 job 上加 if：被跳过的 job 算通过，会盖掉失败的 check
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -258,7 +256,7 @@ jobs:
 
       - run: pip install "git+https://github.com/iamharvey/pairrot.git@<commit-sha>"
 
-      # 打标签会在同一个 head 上重跑，缓存的报告直接复用，不再调模型
+      # 任何标签变化都会在同一个 head 上重跑，缓存的报告直接复用，不再调模型
       - uses: actions/cache/restore@v4
         with:
           path: pairrot-out/runs
@@ -312,7 +310,8 @@ jobs:
 - 触发事件用 `pull_request`，**不要**改成 `pull_request_target`。这样来自 fork 的 PR 拿不到 secrets，评审会失败，而不是在拿到写权限的情况下运行不受信任的代码。
 - 评审即使失败也会发布摘要（`continue-on-error` 加 `if: always()`），最后一步再让 check 按实际结果失败。
 - `--defer-check` 让评审步骤只在运行失败时返回非零，意见是否挡住合并交给发布步骤判断，因为只有发布步骤能看到 PR 标签。
-- **人工放行**：确认是误报时，有写权限的人给 PR 加 `pairrot-override` 标签，check 会在同一个 head 上重跑并通过，摘要里写明是谁放行的，意见照常展示。放行只对当前 head 有效：推新提交时发布步骤会删掉这个标签，需要重新确认。
+- **人工放行**：确认是误报时，有写权限的人给 PR 加 `pairrot-override` 标签，check 会在同一个 head 上重跑并通过，摘要里写明是谁放行的，意见照常展示。放行只对当前 head 有效：推新提交时发布步骤会删掉这个标签，需要重新确认。新提交的运行会取消正在跑的评审，标签触发的运行则排队等它跑完，所以在新 head 评审完成前加的标签会先被删掉，不会被算到维护者没看过的提交上。
+- 任何标签变化都会重跑整个 job，而不是只在 `pairrot-override` 上运行。GitHub 把被跳过的 job 当作通过，如果按标签名跳过，给失败的 PR 随便加一个标签就会让 check 变绿。重跑命中缓存，不会再调模型。
 
 ### GitLab CI
 

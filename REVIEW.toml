@@ -29,10 +29,10 @@ stable = []
 allow_break = []
 
 # Simplifications must name the replacement and argue it keeps behavior and performance.
-# Only findings whose code is mentioned by a test get this level. The rest stay recommend.
+# Kept at recommend: a test file mentioning the function name is too weak a lock to block a merge.
 [simplicity]
 enabled = true
-level = "must_fix"
+level = "recommend"
 extension_points = []
 
 # Counted from git without a model. Any limit that is set fails the check when exceeded.
