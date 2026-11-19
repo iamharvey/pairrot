@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+from importlib import resources
 from pathlib import Path
 
 from pairrot.eval_import import import_audit
@@ -13,6 +14,7 @@ from pairrot.eval_replay import replay
 from pairrot.export import to_markdown, to_sonar
 from pairrot.models import Budget
 from pairrot.pipeline import review_change
+from pairrot.policy import POLICY_FILE
 from pairrot.publish_github import load_report, publish_from_env
 
 
@@ -58,7 +60,47 @@ def _cmd_review(args: argparse.Namespace) -> int:
         f"status={report.status.value} check={'failed' if report.fail_check else 'ok'} "
         f"report={Path(args.out) / 'report.json'} reused={str(report.reused).lower()}"
     )
+    if report.error:
+        print(f"error: {report.error}", file=sys.stderr)
+    hint = _policy_hint(report, Path(args.repo))
+    if hint:
+        print(hint, file=sys.stderr)
     return exit_code(report, defer_check=args.defer_check)
+
+
+def _worktree_policy(repo: Path) -> str | None:
+    if not repo.is_dir():
+        return None
+    for entry in repo.iterdir():
+        if entry.is_file() and entry.name.lower() == POLICY_FILE.lower():
+            return entry.name
+    return None
+
+
+def _policy_hint(report, repo: Path) -> str | None:
+    if report.policy_source != "default" or report.error:
+        return None
+    local = _worktree_policy(repo)
+    if not local:
+        return None
+    if local != POLICY_FILE:
+        return f"note: 工作区里的 {local} 不会被读取，文件名必须是 {POLICY_FILE}"
+    return f"note: 工作区有 {POLICY_FILE}，但 base 上没有，本次按默认规则评审。提交并合进 base 后生效"
+
+
+def _cmd_init(args: argparse.Namespace) -> int:
+    repo = Path(args.repo)
+    existing = _worktree_policy(repo)
+    if existing and not args.force:
+        print(f"error: {repo / existing} 已存在，加 --force 覆盖", file=sys.stderr)
+        return 1
+    if existing and existing != POLICY_FILE:
+        (repo / existing).unlink()
+    target = repo / POLICY_FILE
+    text = resources.files("pairrot").joinpath("REVIEW.example.toml").read_text(encoding="utf-8")
+    target.write_text(text, encoding="utf-8", newline="\n")
+    print(f"wrote {target}。提交并合进主干后，对之后的 PR 生效")
+    return 0
 
 
 def exit_code(report, *, defer_check: bool = False) -> int:
@@ -140,6 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     review.set_defaults(func=_cmd_review)
 
+    init = sub.add_parser("init", help="Write a starter REVIEW.toml to the repository root")
+    init.add_argument("--repo", default=".")
+    init.add_argument("--force", action="store_true", help="Overwrite an existing REVIEW.toml")
+    init.set_defaults(func=_cmd_init)
+
     evaluation = sub.add_parser("eval", help="Import the audit workbook or replay datasets")
     eval_sub = evaluation.add_subparsers(dest="eval_command", required=True)
 
@@ -194,7 +241,7 @@ def load_dotenv(path: Path | None = None) -> None:
         if resolved in seen or not resolved.is_file():
             continue
         seen.add(resolved)
-        for raw in resolved.read_text(encoding="utf-8").splitlines():
+        for raw in resolved.read_text(encoding="utf-8-sig").splitlines():
             line = raw.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue

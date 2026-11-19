@@ -12,6 +12,7 @@ from pathlib import Path
 from pairrot.models import CORRECTNESS_CATEGORIES, Category, norm_path
 from pairrot.snapshot import run_git
 
+POLICY_FILE = "REVIEW.toml"
 _LEVELS = {"must_fix", "recommend"}
 BUDGET_LIMITS = ("max_net_added", "max_new_files", "max_new_symbols", "max_single_use", "max_new_env_reads")
 
@@ -197,7 +198,7 @@ def _limits(table: dict) -> tuple[tuple[str, int], ...]:
 
 def policy_from_toml(text: str) -> Policy:
     try:
-        data = tomllib.loads(text)
+        data = tomllib.loads(text.removeprefix("\ufeff"))
     except tomllib.TOMLDecodeError as exc:
         raise PolicyError(f"REVIEW.toml 无法解析: {exc}") from exc
     if not isinstance(data, dict):
@@ -250,9 +251,23 @@ def policy_from_toml(text: str) -> Policy:
     )
 
 
+def misnamed_policy(repo: Path, rev: str) -> str | None:
+    """A root file that only differs from REVIEW.toml by case. Windows hides the difference, git does not."""
+    listed = run_git(repo, "ls-tree", "--name-only", rev)
+    if listed.returncode != 0:
+        return None
+    for name in listed.stdout.splitlines():
+        if name != POLICY_FILE and name.lower() == POLICY_FILE.lower():
+            return name
+    return None
+
+
 def load_policy(repo: Path, base_sha: str) -> Policy:
-    shown = run_git(repo, "show", f"{base_sha}:REVIEW.toml")
+    shown = run_git(repo, "show", f"{base_sha}:{POLICY_FILE}")
     if shown.returncode != 0:
+        misnamed = misnamed_policy(repo, base_sha)
+        if misnamed:
+            return Policy(source="base", error=f"规则文件名必须是 {POLICY_FILE}，base 上是 {misnamed}")
         return Policy()
     try:
         return policy_from_toml(shown.stdout)

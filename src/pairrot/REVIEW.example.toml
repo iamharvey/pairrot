@@ -1,4 +1,5 @@
-# pairrot 起步配置。复制到仓库根目录，合进主干后，对之后的 PR 生效（规则只从 base 读取）。
+# pairrot 起步配置。用 pairrot init 生成到仓库根目录，文件名必须是大写的 REVIEW.toml。
+# 提交并合进主干后，对之后的 PR 生效（规则只从 base 读取，只在工作区里的文件不生效）。
 # 先观察一两周：意见照常发到 PR，但不让 check 失败。觉得意见靠谱，再把 fail_on_must_fix 改成 true。
 fail_on_must_fix = false
 

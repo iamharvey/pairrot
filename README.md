@@ -22,7 +22,7 @@
 - **示例报告**：[`docs/examples/ledger/summary.md`](docs/examples/ledger/summary.md) 是 v0.2.0 在同一个变更上的完整评审结果，确认 21 条，驳回 0 条，未判定 0 条，用了约 8.9 万 token、114 秒。原始数据见 [`report.json`](docs/examples/ledger/report.json)。
 - **可复制的配置**：
   - 工作流：[GitHub Actions 配置](#github-actions)，可以整段复制，已经固定在 `v0.2.0`；
-  - 起步规则：[`docs/examples/REVIEW.toml`](docs/examples/REVIEW.toml)，默认先观察、不挡合并。
+  - 起步规则：`pairrot init` 会在仓库根目录生成一份（内容见 [`REVIEW.example.toml`](src/pairrot/REVIEW.example.toml)），默认先观察、不挡合并。
 
 ## 快速上手
 
@@ -41,6 +41,8 @@ pairrot export markdown --report pairrot-out/report.json --out pairrot-out/summa
 ```
 
 `summary.md` 和发到 PR 上的摘要内容一样。要接到 GitHub Actions，复制 [GitHub Actions 配置](#github-actions)，再添加三个 secrets 即可。
+
+没有 `REVIEW.toml` 时只看逻辑错误和错误处理。要打开安全、性能等检查，运行 `pairrot init` 生成起步规则，提交并合进主干后，对之后的评审生效。
 
 ## 适合与不适合
 
@@ -357,7 +359,11 @@ pairrot export markdown --report pairrot-out/report.json --out pairrot-out/summa
 
 ### 用 `REVIEW.toml` 调整范围和力度
 
-放在仓库根目录，**从 base 读取**，所以修改要合入主干后才对之后的 PR 生效。
+放在仓库根目录，**从 base 读取**，所以修改要合入主干后才对之后的 PR 生效。用 `pairrot init` 生成起步版本。
+
+- 文件名必须是大写的 `REVIEW.toml`。Windows 不区分大小写，git 区分；base 上只有 `review.toml` 时，评审会失败并报出实际的文件名。
+- 带 BOM 的 UTF-8（Windows 记事本的默认保存格式）和 CRLF 换行都可以正常读取。
+- 工作区里有 `REVIEW.toml`、但 base 上没有时，`pairrot review` 会在终端提示本次按默认规则评审。
 
 ```toml
 fail_on_must_fix = true          # 有确认的 must_fix 意见时让 check 失败
