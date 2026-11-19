@@ -23,12 +23,12 @@ from pairrot.models import (
     Verdict,
     dump_model,
 )
-from pairrot.policy import Policy, load_policy
+from pairrot.policy import Policy, load_policy, load_policy_file
 from pairrot.rules import OFF
 from pairrot.review import PROMPT_VERSION, load_sources, prompt_for, review_diff
 from pairrot.secrets_scan import scan_added_secrets
 from pairrot.simplify import gate_simplifications
-from pairrot.snapshot import GitError, merge_base, resolve_sha, take_snapshot
+from pairrot.snapshot import GitError, merge_base, resolve_sha, take_snapshot, worktree_commit
 from pairrot.tools import RepoTools
 from pairrot.verify import mark_undecided, verify_findings
 
@@ -240,7 +240,7 @@ def _is_secret(finding: Finding) -> bool:
 def review_change(
     repo: Path | str,
     base: str,
-    head: str,
+    head: str | None,
     out_dir: Path | str,
     *,
     ticket: Path | str | None = None,
@@ -251,6 +251,8 @@ def review_change(
     verifier_model: str | None = None,
     reuse: bool = True,
     clock: Clock | None = None,
+    worktree: bool = False,
+    policy_file: Path | str | None = None,
 ) -> RunReport:
     root = Path(repo)
     destination = Path(out_dir)
@@ -261,13 +263,18 @@ def review_change(
     active_clock = clock or Clock()
     try:
         base_sha = resolve_sha(root, base)
-        head_sha = resolve_sha(root, head)
+        if worktree:
+            head_sha = worktree_commit(root)
+        elif head:
+            head_sha = resolve_sha(root, head)
+        else:
+            raise GitError("需要 --head，或用 --worktree 评审工作区")
         base_sha = merge_base(root, base_sha, head_sha)
     except GitError as exc:
         report = _empty_report(
             status=RunStatus.failed,
             base_sha=base,
-            head_sha=head,
+            head_sha=head or "",
             budget=budget,
             key="",
             reviewer_model=reviewer_model,
@@ -280,7 +287,7 @@ def review_change(
         return report
 
     verifier_name = verifier_model or reviewer_model
-    policy = load_policy(root, base_sha)
+    policy = load_policy_file(policy_file) if policy_file else load_policy(root, base_sha)
     key = reuse_key(
         base_sha=base_sha,
         head_sha=head_sha,
@@ -459,6 +466,7 @@ def review_change(
         status=status,
         base_sha=base_sha,
         head_sha=head_sha,
+        head_kind="worktree" if worktree else "commit",
         prompt_version=PROMPT_VERSION,
         budget=budget,
         reuse_key=key,
