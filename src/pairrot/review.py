@@ -154,6 +154,19 @@ def prompt_for(policy: Policy, *, design: bool = False) -> str:
     return "\n".join(lines)
 
 
+def audit_prompt(policy: Policy) -> str:
+    """Same categories as a diff review, but the subject is a whole file that already exists."""
+    text = prompt_for(policy)
+    replacement = "用户消息是一个文件的全文，不是 diff。报告这个文件里现存的缺陷。introduced_in 填 unknown。不要因为问题早就存在而不报。"
+    for current in (
+        "用户消息是一个切片的 diff。只根据这段 diff 下结论。",
+        "用户消息是一个切片的 diff，不是整份变更。只根据这段 diff 下结论。",
+    ):
+        if current in text:
+            return text.replace(current, replacement, 1)
+    return text
+
+
 _TAGGED = {
     False: (("security", Category.security), ("performance", Category.performance)),
     True: (("simplicity", Category.complexity),),
