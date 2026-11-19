@@ -21,7 +21,7 @@
 - **示例 PR**：[PR #6](https://github.com/iamharvey/pairrot/pull/6) 上有 pairrot 发的 20 条行内评论和一条摘要，可以直接翻看每条意见的写法。
 - **示例报告**：[`docs/examples/ledger/summary.md`](docs/examples/ledger/summary.md) 是 v0.2.0 在同一个变更上的完整评审结果，确认 21 条，驳回 0 条，未判定 0 条，用了约 8.9 万 token、114 秒。原始数据见 [`report.json`](docs/examples/ledger/report.json)。
 - **可复制的配置**：
-  - 工作流：[GitHub Actions 配置](#github-actions)，可以整段复制，已经固定在 `v0.2.0`；
+  - 工作流：[GitHub Actions 配置](#github-actions)，可以整段复制，已经固定在 `v0.3.0`；
   - 起步规则：`pairrot init` 会在仓库根目录生成一份（内容见 [`REVIEW.example.toml`](src/pairrot/REVIEW.example.toml)），默认先观察、不挡合并。
 
 ## 快速上手
@@ -29,7 +29,7 @@
 需要 Python 3.11 或以上、git 2.x，以及一个 OpenAI 兼容的模型接口。
 
 ```bash
-pip install "git+https://github.com/iamharvey/pairrot.git@v0.2.0"
+pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.0"
 
 export PAIRROT_BASE_URL=https://api.deepseek.com/v1
 export PAIRROT_API_KEY=sk-...
@@ -177,7 +177,7 @@ pairrot export markdown --report pairrot-out/checkout/report.json --out pairrot-
 
 ### GitHub Actions
 
-本仓库自带 [`.github/workflows/pairrot-review.yml`](.github/workflows/pairrot-review.yml)，PR 打开或更新时运行。在其他仓库使用时，把 `pip install .` 换成固定版本的安装（下面用的是 `v0.2.0` 标签）：
+本仓库自带 [`.github/workflows/pairrot-review.yml`](.github/workflows/pairrot-review.yml)，PR 打开或更新时运行。在其他仓库使用时，把 `pip install .` 换成固定版本的安装（下面用的是 `v0.3.0` 标签）：
 
 ```yaml
 name: pairrot review
@@ -209,7 +209,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install "git+https://github.com/iamharvey/pairrot.git@v0.2.0"
+      - run: pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.0"
 
       # 任何标签变化都会在同一个 head 上重跑，缓存的报告直接复用，不再调模型
       - uses: actions/cache/restore@v4
@@ -282,7 +282,7 @@ pairrot-review:
     GIT_DEPTH: "0"                # 需要完整历史来算 merge-base
     PAIRROT_DISABLE_DOTENV: "1"
   script:
-    - pip install "git+https://github.com/iamharvey/pairrot.git@v0.2.0"
+    - pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.0"
     - status=0
     - >
       pairrot review --repo .

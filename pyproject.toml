@@ -1,6 +1,6 @@
 [project]
 name = "pairrot"
-version = "0.2.0"
+version = "0.3.0"
 description = "Code review that verifies each finding before it is posted: snapshot, review, verify, publish, and offline replay."
 requires-python = ">=3.11"
 dependencies = [
