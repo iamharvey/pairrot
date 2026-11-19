@@ -53,7 +53,22 @@ pairrot export markdown --report pairrot-out/report.json --out pairrot-out/summa
 
 在 GitHub Actions 之外，默认预算更大：每次评审最多 8 次跨文件查询、80 个文件、8000 行改动、20 分钟。CI 里仍是 2 次查询、40 个文件、2000 行、10 分钟，工作流里另有覆盖。设置了 `PAIRROT_MAX_TOOL_CALLS` 等变量时以变量为准。
 
-## 适合与不适合
+## 全量体检
+
+第一次接入时，先把仓库里已经存在的问题记下来，之后的评审只报新问题。
+
+```bash
+# 按文件体检 HEAD。一次跑不完会在 --out 里记下进度，再运行同一条命令继续
+pairrot scan --repo . --rev HEAD --out pairrot-scan
+
+# 只体检一个目录，并在全部完成后把确认的问题写成基线
+pairrot scan --repo . --rev HEAD --path src --out pairrot-scan --save-baseline pairrot-baseline.json
+
+# 之后的 diff 评审跳过基线里的问题
+pairrot review --repo . --base origin/main --head HEAD --baseline pairrot-baseline.json --out pairrot-out
+```
+
+体检看的是这个提交上的文件全文，不是 diff。规则从同一个提交的 `REVIEW.toml` 读取。不往 PR 上发评论。锁文件、vendor 和生成文件会跳过，超过 1500 行的文件也会跳过。契约和简化建议只在 diff 评审里做，体检不报这两类。费用或文件数到达本次上限就停下，进度在 `scan_state.json`。`--save-baseline` 只在全部文件都体检完时写出。基线不收录密钥：密钥的指纹没有行号，收录后一条新的同名密钥会被当成旧问题。
 
 **适合**：
 

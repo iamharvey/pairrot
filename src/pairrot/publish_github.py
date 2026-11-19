@@ -350,7 +350,10 @@ def _publication(
         findings_block = f"### 未挂到行内的意见\n{extra}\n\n"
     if report.complexity is not None:
         findings_block += _complexity_block(report.complexity)
-    head_note = "（工作区快照，含未提交的改动）" if report.head_kind == "worktree" else ""
+    head_note = {
+        "worktree": "（工作区快照，含未提交的改动）",
+        "scan": "（全量体检，不是一次变更）",
+    }.get(report.head_kind, "")
     summary = (
         f"{SUMMARY_MARKER}\n"
         f"## pairrot 评审\n\n"

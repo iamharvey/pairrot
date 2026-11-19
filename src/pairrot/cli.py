@@ -14,6 +14,7 @@ from pairrot.eval_replay import replay
 from pairrot.export import to_markdown, to_sonar
 from pairrot.models import Budget
 from pairrot.pipeline import review_change
+from pairrot.scan import scan_tree
 from pairrot.policy import POLICY_FILE
 from pairrot.publish_github import load_report, publish_from_env
 
@@ -80,6 +81,7 @@ def _cmd_review(args: argparse.Namespace) -> int:
         verifier_model=verifier,
         worktree=args.worktree,
         policy_file=args.policy,
+        baseline=args.baseline,
     )
     print(
         f"status={report.status.value} check={'failed' if report.fail_check else 'ok'} "
@@ -164,6 +166,33 @@ def _cmd_replay(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_scan(args: argparse.Namespace) -> int:
+    reviewer, verifier = _models(args.verifier_model)
+    report = scan_tree(
+        args.repo,
+        args.rev,
+        args.out,
+        path=args.path or "",
+        baseline=args.baseline,
+        save_baseline_to=args.save_baseline,
+        budget=_budget_from_env(args.cost_cap),
+        reviewer_model=reviewer,
+        verifier_model=verifier,
+    )
+    remaining = sum(1 for item in report.unreviewed if item.reason == "尚未体检")
+    print(
+        f"status={report.status.value} scanned={len(report.reviewed)} remaining={remaining} "
+        f"report={Path(args.out) / 'report.json'}"
+    )
+    _print_findings(report)
+    if remaining:
+        print("再运行同一条命令会从上次停下的文件继续", file=sys.stderr)
+    if report.error:
+        print(f"error: {report.error}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _cmd_publish(args: argparse.Namespace) -> int:
     planned = publish_from_env(
         args.report,
@@ -208,6 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--policy",
         help="Read rules from this file instead of the base commit. CI will not use it",
     )
+    review.add_argument("--baseline", help="Skip findings whose fingerprint is in this scan baseline")
     review.add_argument("--out", required=True)
     review.add_argument("--ticket", help="Local ticket text. Missing means a coverage gap")
     review.add_argument("--ci", help="Local CI JSON. Missing means a coverage gap")
@@ -219,6 +249,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exit 0 on must_fix findings and leave the check to publish, which honors the override label",
     )
     review.set_defaults(func=_cmd_review)
+
+    scan = sub.add_parser("scan", help="Audit a whole revision in resumable batches")
+    scan.add_argument("--repo", required=True)
+    scan.add_argument("--rev", default="HEAD")
+    scan.add_argument("--out", required=True)
+    scan.add_argument("--path", default="", help="Only files under this path")
+    scan.add_argument("--baseline", help="Skip findings already listed in this baseline")
+    scan.add_argument("--save-baseline", help="Write confirmed fingerprints when the scan finishes")
+    scan.add_argument("--cost-cap", type=float, default=None)
+    scan.add_argument("--verifier-model", default=None)
+    scan.set_defaults(func=_cmd_scan)
 
     init = sub.add_parser("init", help="Write a starter REVIEW.toml to the repository root")
     init.add_argument("--repo", default=".")

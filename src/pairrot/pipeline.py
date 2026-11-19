@@ -23,6 +23,7 @@ from pairrot.models import (
     Verdict,
     dump_model,
 )
+from pairrot.baseline import baseline_digest, load_baseline, without_baseline
 from pairrot.policy import Policy, load_policy, load_policy_file
 from pairrot.rules import OFF
 from pairrot.review import PROMPT_VERSION, load_sources, prompt_for, review_diff
@@ -52,6 +53,7 @@ def reuse_key(
     reviewer_model: str | None,
     verifier_model: str | None,
     policy_key: str = "default",
+    baseline_key: str = "",
 ) -> str:
     payload = {
         "base": base_sha,
@@ -62,6 +64,7 @@ def reuse_key(
         "reviewer_model": reviewer_model,
         "verifier_model": verifier_model,
         "policy": policy_key,
+        "baseline": baseline_key,
     }
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
@@ -253,6 +256,7 @@ def review_change(
     clock: Clock | None = None,
     worktree: bool = False,
     policy_file: Path | str | None = None,
+    baseline: Path | str | None = None,
 ) -> RunReport:
     root = Path(repo)
     destination = Path(out_dir)
@@ -288,6 +292,12 @@ def review_change(
 
     verifier_name = verifier_model or reviewer_model
     policy = load_policy_file(policy_file) if policy_file else load_policy(root, base_sha)
+    known: set[str] = set()
+    if baseline and not policy.error:
+        try:
+            known = load_baseline(baseline)
+        except ValueError as exc:
+            policy = Policy(source="base", error=str(exc))
     key = reuse_key(
         base_sha=base_sha,
         head_sha=head_sha,
@@ -296,6 +306,7 @@ def review_change(
         reviewer_model=reviewer_model,
         verifier_model=verifier_name,
         policy_key=policy.digest(),
+        baseline_key=baseline_digest(known),
     )
     if policy.error:
         report = _empty_report(
@@ -396,6 +407,8 @@ def review_change(
                 diffs.update(pass_diffs)
                 packs.update(pass_packs)
             findings, duplicates = _dedupe(findings)
+            findings, known_dropped = without_baseline(findings, known)
+            duplicates += known_dropped
             findings, ruled_off = _apply_levels(findings, policy)
             duplicates += ruled_off
             findings, gated = gate_simplifications(
@@ -432,7 +445,8 @@ def review_change(
     if policy.scans_secrets() and snapshot.reviewed:
         findings = scan_added_secrets(root, snapshot) + findings
     findings, ruled_off = _apply_levels(findings, policy)
-    dropped = dropped + ruled_off
+    findings, known_dropped = without_baseline(findings, known)
+    dropped = dropped + ruled_off + known_dropped
 
     confirmed = []
     rejected = []
