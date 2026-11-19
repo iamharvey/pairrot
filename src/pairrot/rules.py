@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pairrot.models import Category, Finding
+from pairrot.models import Category
 
 OFF = "off"
 SEVERITY_RANK = {"S1": 1, "S2": 2, "S3": 3}
@@ -54,16 +54,10 @@ _TABLE_OF = {
 }
 # Categories whose rule is the category itself, so the reviewer does not tag them.
 _SELF_RULED = {Category.logic_error, Category.error_handling, Category.contract_break}
-_SECRET_RULES = {"private_key": "private_key", "token": "token"}
 
 
 def table_of(category: Category, *, secret: bool = False) -> str | None:
     return "secrets" if secret else _TABLE_OF.get(category)
-
-
-def tagged_tables() -> tuple[str, ...]:
-    """Tables whose findings carry a rule chosen by the reviewer."""
-    return ("security", "performance", "simplicity")
 
 
 def rule_for(category: Category, raw: object) -> str:
@@ -79,11 +73,7 @@ def rule_for(category: Category, raw: object) -> str:
 
 
 def secret_rule(label: str) -> str:
-    return _SECRET_RULES.get(label, "credential")
-
-
-def selector_of(finding: Finding, *, secret: bool = False) -> tuple[str | None, str]:
-    return table_of(finding.category, secret=secret), finding.rule
+    return label if label in {"private_key", "token"} else "credential"
 
 
 def valid_selector(text: str) -> bool:

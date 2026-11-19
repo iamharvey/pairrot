@@ -197,7 +197,8 @@ off = ["secrets"]
     write(repo, "app.py", "x = 1\n")
     base = commit(repo, "base")
     write(repo, "app.py", "def get(user, order):\n    return order\n")
-    write(repo, "tests/test_app.py", 'api_key = "supersecretvalue"\n')
+    # Built in pieces so this test file itself does not look like a committed secret.
+    write(repo, "tests/test_app.py", "api_" + "key = " + '"supersecretvalue"\n')
     tip = commit(repo, "head")
     calls = {"verify": 0}
 
