@@ -208,6 +208,34 @@ def test_a_secret_stays_visible_when_its_fingerprint_is_in_the_baseline():
     assert dropped == []
 
 
+def test_a_skipped_file_is_recorded_before_the_scan_returns(tmp_path: Path):
+    repo = init_repo(tmp_path / "repo")
+    write(repo, "big.py", "x = 1\n" * 1501)
+    rev = commit(repo, "base")
+    scan_tree(repo, rev, tmp_path / "out", llm=_model([]), budget=Budget(max_files=5))
+    state = json.loads((tmp_path / "out" / "scan_state.json").read_text(encoding="utf-8"))
+    assert state["pending"] == []
+    assert state["skipped"][0]["path"] == "big.py"
+
+
+def test_a_model_error_is_not_replaced_by_the_unfinished_baseline_note(tmp_path: Path):
+    repo, rev = _repo(tmp_path)
+
+    def broken(messages, model):
+        raise RuntimeError("模型挂了")
+
+    report = scan_tree(
+        repo,
+        rev,
+        tmp_path / "out",
+        llm=FakeModel(broken),
+        budget=Budget(max_files=1),
+        save_baseline_to=tmp_path / "base.json",
+    )
+    assert report.error == "模型挂了"
+    assert not (tmp_path / "base.json").exists()
+
+
 def test_save_baseline_creates_a_missing_parent(tmp_path: Path):
     target = tmp_path / "nested" / "baseline.json"
     save_baseline(target, {"abc"}, rev="a" * 40)

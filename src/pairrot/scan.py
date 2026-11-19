@@ -345,18 +345,19 @@ def scan_tree(
             "completion_tokens": prior_tokens["completion_tokens"] + tracker.tokens.completion_tokens,
             "total": prior_tokens["total"] + tracker.tokens.total,
         }
+
+    def persist() -> None:
+        note_usage()
+        state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
     while state["pending"] and batch < budget.max_files and tracker.allow_model_call() and not tracker.error:
         current = state["pending"][0]
         text = _file_text(root, pinned, current)
-        if text is None:
-            state["skipped"].append(FileSpan(path=current, status="A", reason="二进制文件").model_dump(mode="json"))
+        if text is None or len(text.splitlines()) > _MAX_LINES:
+            reason = "二进制文件" if text is None else f"超过 {_MAX_LINES} 行"
+            state["skipped"].append(FileSpan(path=current, status="A", reason=reason).model_dump(mode="json"))
             state["pending"].pop(0)
-            continue
-        if len(text.splitlines()) > _MAX_LINES:
-            state["skipped"].append(
-                FileSpan(path=current, status="A", reason=f"超过 {_MAX_LINES} 行").model_dump(mode="json")
-            )
-            state["pending"].pop(0)
+            persist()
             continue
         secrets = _secrets(current, text) if policy.scans_secrets() else []
         found, lost, finished = _scan_file(
@@ -378,10 +379,9 @@ def scan_tree(
         state["done"].append(current)
         state["pending"].pop(0)
         batch += 1
-        note_usage()
-        state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        persist()
 
-    note_usage()
+    persist()
     report = _report_from(
         state=state,
         rev=pinned,
@@ -393,14 +393,13 @@ def scan_tree(
         known=known,
         elapsed=active_clock.elapsed(),
     )
-    if save_baseline_to:
-        if state["pending"]:
-            report = report.model_copy(update={"error": "体检还没完成，不能写基线", "status": RunStatus.partial})
-        else:
-            fingerprints = known | {item.fingerprint for item in report.confirmed if not is_secret(item)}
-            try:
-                save_baseline(save_baseline_to, fingerprints, rev=pinned)
-            except ValueError as exc:
-                report = report.model_copy(update={"error": str(exc)})
+    if save_baseline_to and not state["pending"]:
+        fingerprints = known | {item.fingerprint for item in report.confirmed if not is_secret(item)}
+        try:
+            save_baseline(save_baseline_to, fingerprints, rev=pinned)
+        except ValueError as exc:
+            report = report.model_copy(update={"error": str(exc)})
+    elif save_baseline_to and not report.error:
+        report = report.model_copy(update={"error": "体检还没完成，不能写基线", "status": RunStatus.partial})
     _write_report(report, destination)
     return report
