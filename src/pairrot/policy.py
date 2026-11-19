@@ -6,7 +6,7 @@ import fnmatch
 import hashlib
 import json
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from pairrot.models import CORRECTNESS_CATEGORIES, Category, Finding, IntroducedIn, norm_path
@@ -80,7 +80,7 @@ class Policy:
 
     @property
     def active(self) -> bool:
-        return self.source == "base" and not self.error
+        return self.source in {"base", "local"} and not self.error
 
     def table_enabled(self, table: str) -> bool:
         return bool(getattr(self, f"{table}_enabled"))
@@ -184,7 +184,10 @@ class Policy:
             parts.append(f"complexity_budget={len(self.budget_limits)}项")
         if self.extras:
             parts.append(f"extra={len(self.extras)}")
-        return "、".join(parts)
+        text = "、".join(parts)
+        if self.source == "local":
+            return "本地规则，CI 不会用这份。" + text
+        return text
 
     def digest(self) -> str:
         if self.error:
@@ -194,6 +197,7 @@ class Policy:
         else:
             raw = json.dumps(
                 {
+                    "source": self.source,
                     "fail_on_must_fix": self.fail_on_must_fix,
                     "correctness_enabled": self.correctness_enabled,
                     "correctness_level": self.correctness_level,
@@ -410,6 +414,20 @@ def misnamed_policy(repo: Path, rev: str) -> str | None:
         if name != POLICY_FILE and name.lower() == POLICY_FILE.lower():
             return name
     return None
+
+
+def load_policy_file(path: Path | str) -> Policy:
+    """A REVIEW.toml from disk. Active for this run only; CI keeps reading the base commit."""
+    file = Path(path)
+    try:
+        text = file.read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        return Policy(source="local", error=f"读不到规则文件 {file}: {exc}")
+    try:
+        parsed = policy_from_toml(text)
+    except PolicyError as exc:
+        return Policy(source="local", error=str(exc))
+    return replace(parsed, source="local")
 
 
 def load_policy(repo: Path, base_sha: str) -> Policy:

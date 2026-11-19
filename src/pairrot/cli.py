@@ -19,14 +19,20 @@ from pairrot.publish_github import load_report, publish_from_env
 
 
 def _budget_from_env(cost_cap: float | None) -> Budget:
+    """Outside GitHub Actions the defaults are larger, so a local run can look across files.
+
+    CI sets GITHUB_ACTIONS and keeps the smaller defaults unless its workflow overrides them.
+    An explicit PAIRROT_* variable always wins.
+    """
     cap = cost_cap
     if cap is None and os.environ.get("PAIRROT_COST_CAP"):
         cap = float(os.environ["PAIRROT_COST_CAP"])
     per = float(os.environ.get("PAIRROT_COST_PER_1K_TOKENS") or 0)
-    wall = int(os.environ.get("PAIRROT_WALL_CLOCK_SECONDS") or 600)
-    tools = int(os.environ.get("PAIRROT_MAX_TOOL_CALLS") or 2)
-    files = int(os.environ.get("PAIRROT_MAX_FILES") or 40)
-    lines = int(os.environ.get("PAIRROT_MAX_CHANGED_LINES") or 2000)
+    ci = os.environ.get("GITHUB_ACTIONS") == "true"
+    wall = int(os.environ.get("PAIRROT_WALL_CLOCK_SECONDS") or (600 if ci else 1200))
+    tools = int(os.environ.get("PAIRROT_MAX_TOOL_CALLS") or (2 if ci else 8))
+    files = int(os.environ.get("PAIRROT_MAX_FILES") or (40 if ci else 80))
+    lines = int(os.environ.get("PAIRROT_MAX_CHANGED_LINES") or (2000 if ci else 8000))
     return Budget(
         max_tool_calls_per_perspective=tools,
         wall_clock_seconds=wall,
@@ -43,7 +49,24 @@ def _models(verifier_arg: str | None) -> tuple[str | None, str | None]:
     return reviewer, verifier
 
 
+def _print_findings(report) -> None:
+    confirmed = sorted(report.confirmed, key=lambda item: (item.location.file, item.location.start_line))
+    print(f"findings={len(confirmed)}")
+    for finding in confirmed:
+        mark = finding.level or finding.severity.value
+        title = finding.title or finding.trigger
+        print(f"  {mark} {finding.location.file}:{finding.location.start_line} {title}")
+    if report.undecided:
+        print(f"undecided={len(report.undecided)}")
+
+
 def _cmd_review(args: argparse.Namespace) -> int:
+    if args.worktree and args.head:
+        print("error: --worktree 用工作区代替 --head，不要同时传", file=sys.stderr)
+        return 1
+    if not args.worktree and not args.head:
+        print("error: 需要 --head，或用 --worktree 评审工作区", file=sys.stderr)
+        return 1
     reviewer, verifier = _models(args.verifier_model)
     report = review_change(
         args.repo,
@@ -55,13 +78,19 @@ def _cmd_review(args: argparse.Namespace) -> int:
         budget=_budget_from_env(args.cost_cap),
         reviewer_model=reviewer,
         verifier_model=verifier,
+        worktree=args.worktree,
+        policy_file=args.policy,
     )
     print(
         f"status={report.status.value} check={'failed' if report.fail_check else 'ok'} "
         f"report={Path(args.out) / 'report.json'} reused={str(report.reused).lower()}"
+        + (" worktree=true" if report.head_kind == "worktree" else "")
     )
+    _print_findings(report)
     if report.error:
         print(f"error: {report.error}", file=sys.stderr)
+    if report.policy_source == "local":
+        print("note: 使用了本地规则，CI 不会用这份 REVIEW.toml", file=sys.stderr)
     hint = _policy_hint(report, Path(args.repo))
     if hint:
         print(hint, file=sys.stderr)
@@ -169,7 +198,16 @@ def build_parser() -> argparse.ArgumentParser:
     review = sub.add_parser("review", help="Review one local diff and write a JSON report")
     review.add_argument("--repo", required=True)
     review.add_argument("--base", required=True)
-    review.add_argument("--head", required=True)
+    review.add_argument("--head", help="Commit to review. Omit it with --worktree")
+    review.add_argument(
+        "--worktree",
+        action="store_true",
+        help="Review the working tree, including uncommitted and untracked files, instead of --head",
+    )
+    review.add_argument(
+        "--policy",
+        help="Read rules from this file instead of the base commit. CI will not use it",
+    )
     review.add_argument("--out", required=True)
     review.add_argument("--ticket", help="Local ticket text. Missing means a coverage gap")
     review.add_argument("--ci", help="Local CI JSON. Missing means a coverage gap")

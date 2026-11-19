@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -77,6 +79,52 @@ def git_text(repo: Path, *args: str) -> str:
 
 def resolve_sha(repo: Path, rev: str) -> str:
     return git_text(repo, "rev-parse", "--verify", f"{rev}^{{commit}}").strip()
+
+
+def worktree_commit(repo: Path) -> str:
+    """Snapshot the working tree as a commit, including untracked files.
+
+    Uses a temporary index, so HEAD, the real index and the files stay as they are.
+    The commit is not on any branch. Ignored files are left out.
+    """
+    root = Path(repo)
+    fd, index_path = tempfile.mkstemp(prefix="pairrot-index-")
+    os.close(fd)
+    try:
+        env = os.environ.copy()
+        env["GIT_INDEX_FILE"] = index_path
+
+        def indexed(*args: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ["git", "-C", str(root), *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                env=env,
+            )
+
+        head = run_git(root, "rev-parse", "--verify", "HEAD")
+        parent = head.stdout.strip() if head.returncode == 0 else ""
+        read = indexed("read-tree", parent or "--empty")
+        if read.returncode != 0:
+            raise GitError(read.stderr.strip() or "git read-tree failed")
+        added = indexed("add", "--all")
+        if added.returncode != 0:
+            raise GitError(added.stderr.strip() or "git add failed")
+        tree = indexed("write-tree")
+        if tree.returncode != 0:
+            raise GitError(tree.stderr.strip() or "git write-tree failed")
+        command = ["commit-tree", tree.stdout.strip(), "-m", "pairrot worktree snapshot"]
+        if parent:
+            command[1:1] = ["-p", parent]
+        made = run_git(root, *command)
+        if made.returncode != 0:
+            raise GitError(made.stderr.strip() or "git commit-tree failed")
+        return made.stdout.strip()
+    finally:
+        os.unlink(index_path)
 
 
 def literal_pathspec(path: str) -> str:

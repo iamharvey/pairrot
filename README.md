@@ -35,14 +35,23 @@ export PAIRROT_BASE_URL=https://api.deepseek.com/v1
 export PAIRROT_API_KEY=sk-...
 export PAIRROT_MODEL=deepseek-v4-flash
 
-# 评审当前分支相对 main 的已提交改动
+# 评审当前分支相对 main 的已提交改动。确认的意见会直接打印在终端
 pairrot review --repo . --base origin/main --head HEAD --out pairrot-out
+
+# 把工作区里还没提交的改动也算进去，包括未跟踪的新文件
+pairrot review --repo . --base origin/main --worktree --out pairrot-out
+
+# 试用一份还没合进主干的规则。终端会标明 CI 不会用这份
+pairrot review --repo . --base origin/main --head HEAD --policy ./REVIEW.toml --out pairrot-out
+
 pairrot export markdown --report pairrot-out/report.json --out pairrot-out/summary.md
 ```
 
 `summary.md` 和发到 PR 上的摘要内容一样。要接到 GitHub Actions，复制 [GitHub Actions 配置](#github-actions)，再添加三个 secrets 即可。
 
-没有 `REVIEW.toml` 时只看逻辑错误和错误处理。要打开安全、性能等检查，运行 `pairrot init` 生成起步规则，提交并合进主干后，对之后的评审生效。
+没有 `REVIEW.toml` 时只看逻辑错误和错误处理。要打开安全、性能等检查，运行 `pairrot init` 生成起步规则，提交并合进主干后，对之后的评审生效。想先在本地试这份规则，用 `--policy`。
+
+在 GitHub Actions 之外，默认预算更大：每次评审最多 8 次跨文件查询、80 个文件、8000 行改动、20 分钟。CI 里仍是 2 次查询、40 个文件、2000 行、10 分钟，工作流里另有覆盖。设置了 `PAIRROT_MAX_TOOL_CALLS` 等变量时以变量为准。
 
 ## 适合与不适合
 
@@ -464,7 +473,9 @@ must_fix_min_severity = "S3"     # 核心模块 S3 也挡合并
 
 ### 调预算
 
-- **查得更深**：调大 `PAIRROT_MAX_TOOL_CALLS`，评审模型可以多做几次只读查询。
+本地和 CI 的默认值不同，见[快速上手](#快速上手)。
+
+- **查得更深**：调大 `PAIRROT_MAX_TOOL_CALLS`，评审模型可以多做几次只读查询。一次评审里的查询共用这个上限，所以本地默认是 8 而不是 2。
 - **大 PR**：调大 `PAIRROT_MAX_FILES`、`PAIRROT_MAX_CHANGED_LINES` 和 `PAIRROT_WALL_CLOCK_SECONDS`。否则超出部分会记为未审查，状态为 `partial`。
 - **控制成本**：设置 `PAIRROT_COST_CAP`。触顶后剩下的候选记为未判定，不会被丢掉。
 

@@ -454,9 +454,18 @@ def test_cli_import_review_reuse_and_replay_gap(tmp_path: Path):
     repo, base, tip = _feature_repo(tmp_path)
     out = tmp_path / "review-out"
     model_out = out
+    from pairrot.cli import _budget_from_env
     from pairrot.pipeline import review_change
 
-    review_change(repo, base, tip, model_out, llm=_model())
+    # The CLI computes its budget after dropping PAIRROT_* from the environment.
+    saved = {
+        key: os.environ.pop(key)
+        for key in list(os.environ)
+        if key.startswith("PAIRROT_") or key.startswith("OPENAI_")
+    }
+    budget = _budget_from_env(None)
+    os.environ.update(saved)
+    review_change(repo, base, tip, model_out, llm=_model(), budget=budget)
     env = os.environ.copy()
     for key in list(env):
         if key.startswith("PAIRROT_") or key.startswith("OPENAI_"):

@@ -248,6 +248,7 @@ class RunReport(BaseModel):
     status: RunStatus
     base_sha: str
     head_sha: str
+    head_kind: str = "commit"
     prompt_version: str
     budget: Budget
     reuse_key: str = ""

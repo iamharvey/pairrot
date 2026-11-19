@@ -261,7 +261,7 @@ def plan_publication(
     posted: set[str],
     override: Override | None = None,
 ) -> Publication:
-    if report.policy_source == "base":
+    if report.policy_source in {"base", "local"}:
         return _plan_leveled(report, diff_lines, posted, override or Override())
     inline: list[InlineComment] = []
     summary_only: list[str] = []
@@ -350,13 +350,14 @@ def _publication(
         findings_block = f"### 未挂到行内的意见\n{extra}\n\n"
     if report.complexity is not None:
         findings_block += _complexity_block(report.complexity)
+    head_note = "（工作区快照，含未提交的改动）" if report.head_kind == "worktree" else ""
     summary = (
         f"{SUMMARY_MARKER}\n"
         f"## pairrot 评审\n\n"
         f"状态：**{report.status.value}**\n\n"
         f"{check}"
         f"base `{report.base_sha}`\n\n"
-        f"head `{report.head_sha}`\n\n"
+        f"head `{report.head_sha}`{head_note}\n\n"
         f"已审查：\n{reviewed}\n\n"
         f"未审查：\n{unreviewed}\n\n"
         f"需求：{report.coverage.ticket}\n\n"
