@@ -9,11 +9,15 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from pairrot.models import CORRECTNESS_CATEGORIES, Category, norm_path
+from pairrot.models import CORRECTNESS_CATEGORIES, Category, Finding, IntroducedIn, norm_path
+from pairrot.rules import CATALOG, OFF, SEVERITY_RANK, table_of, valid_selector
 from pairrot.snapshot import run_git
 
 POLICY_FILE = "REVIEW.toml"
 _LEVELS = {"must_fix", "recommend"}
+_PREEXISTING = {"recommend", "keep", OFF}
+_LEVEL_ORDER = [OFF, "recommend", "must_fix"]
+_TABLES = ("correctness", "secrets", "performance", "security", "compatibility", "simplicity")
 BUDGET_LIMITS = ("max_net_added", "max_new_files", "max_new_symbols", "max_single_use", "max_new_env_reads")
 
 
@@ -24,6 +28,27 @@ def matches(path: str, patterns: tuple[str, ...]) -> bool:
 
 class PolicyError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class Override:
+    """Settings for findings whose file matches paths. Later overrides win."""
+
+    paths: tuple[str, ...]
+    off: tuple[str, ...] = ()
+    level: str | None = None
+    must_fix_min_severity: str | None = None
+
+    def turns_off(self, table: str, rule: str) -> bool:
+        return table in self.off or f"{table}.{rule}" in self.off
+
+    def as_dict(self) -> dict:
+        return {
+            "paths": list(self.paths),
+            "off": list(self.off),
+            "level": self.level,
+            "must_fix_min_severity": self.must_fix_min_severity,
+        }
 
 
 @dataclass(frozen=True)
@@ -47,25 +72,73 @@ class Policy:
     extension_points: tuple[str, ...] = ()
     budget_limits: tuple[tuple[str, int], ...] = ()
     extras: tuple[str, ...] = ()
+    rule_levels: tuple[tuple[str, str], ...] = ()
+    must_fix_min_severity: str = "S3"
+    overrides: tuple[Override, ...] = ()
+    preexisting: str = "recommend"
     error: str | None = None
 
     @property
     def active(self) -> bool:
         return self.source == "base" and not self.error
 
+    def table_enabled(self, table: str) -> bool:
+        return bool(getattr(self, f"{table}_enabled"))
+
+    def rule_level(self, table: str, rule: str) -> str:
+        """must_fix, recommend or off for one rule, before path overrides."""
+        if not self.table_enabled(table):
+            return OFF
+        return dict(self.rule_levels).get(f"{table}.{rule}", getattr(self, f"{table}_level"))
+
+    def live_rules(self, table: str) -> list[str]:
+        return [rule for rule in CATALOG[table] if self.rule_level(table, rule) != OFF]
+
     def llm_categories(self) -> frozenset[Category]:
+        if not self.active:
+            return frozenset(CORRECTNESS_CATEGORIES)
         found: set[Category] = set()
-        if not self.active or self.correctness_enabled:
-            found.update(CORRECTNESS_CATEGORIES)
-        if self.active and self.performance_enabled:
-            found.add(Category.performance)
-        if self.active and self.security_enabled:
-            found.add(Category.security)
-        if self.active and self.compatibility_enabled:
-            found.add(Category.contract_break)
-        if self.active and self.simplicity_enabled:
-            found.add(Category.complexity)
+        for category in CORRECTNESS_CATEGORIES:
+            if self.rule_level("correctness", category.value) != OFF:
+                found.add(category)
+        for table, category in (
+            ("performance", Category.performance),
+            ("security", Category.security),
+            ("compatibility", Category.contract_break),
+            ("simplicity", Category.complexity),
+        ):
+            if self.live_rules(table):
+                found.add(category)
         return frozenset(found)
+
+    def scans_secrets(self) -> bool:
+        return self.active and bool(self.live_rules("secrets"))
+
+    def decide(self, finding: Finding, *, secret: bool = False, locked: bool = False) -> str:
+        """must_fix, recommend or off for one finding, after rules, path overrides and the severity floor."""
+        table = table_of(finding.category, secret=secret)
+        if table is None:
+            return "recommend"
+        level = self.rule_level(table, finding.rule)
+        floor = self.must_fix_min_severity
+        for override in self.overrides:
+            if not matches(finding.location.file, override.paths):
+                continue
+            if override.turns_off(table, finding.rule):
+                level = OFF
+            elif override.level and level != OFF:
+                level = override.level
+            if override.must_fix_min_severity:
+                floor = override.must_fix_min_severity
+        if finding.introduced_in == IntroducedIn.preexisting and self.preexisting != "keep":
+            level = OFF if self.preexisting == OFF else min(level, "recommend", key=_LEVEL_ORDER.index)
+        if level == OFF:
+            return OFF
+        if table == "simplicity" and not locked:
+            return "recommend"
+        if level == "must_fix" and SEVERITY_RANK[finding.severity.value] > SEVERITY_RANK[floor]:
+            return "recommend"
+        return level
 
     def design_categories(self) -> frozenset[Category]:
         return self.llm_categories() & {Category.contract_break, Category.complexity}
@@ -82,32 +155,21 @@ class Policy:
         """Breaking this path breaks outside users. allow_break lifts it for the change that the base allows."""
         return matches(path, self.stable) and not matches(path, self.allow_break)
 
-    def level_for(self, category: Category, *, secret: bool = False, locked: bool = False) -> str:
-        if secret:
-            return self.secrets_level
-        if category == Category.complexity:
-            return self.simplicity_level if locked else "recommend"
-        if category == Category.contract_break:
-            return self.compatibility_level
-        if category == Category.security:
-            return self.security_level
-        if category == Category.performance:
-            return self.performance_level
-        if category in CORRECTNESS_CATEGORIES:
-            return self.correctness_level
-        return "recommend"
-
     def note(self) -> str:
         if not self.active:
             return ""
         parts = [
-            f"correctness={'开启' if self.correctness_enabled else '关闭'}:{self.correctness_level}",
-            f"secrets={'开启' if self.secrets_enabled else '关闭'}:{self.secrets_level}",
-            f"performance={'开启' if self.performance_enabled else '关闭'}:{self.performance_level}",
-            f"security={'开启' if self.security_enabled else '关闭'}:{self.security_level}",
-            f"compatibility={'开启' if self.compatibility_enabled else '关闭'}:{self.compatibility_level}",
-            f"simplicity={'开启' if self.simplicity_enabled else '关闭'}:{self.simplicity_level}",
+            f"{table}={'开启' if self.table_enabled(table) else '关闭'}:{getattr(self, f'{table}_level')}"
+            for table in _TABLES
         ]
+        if self.rule_levels:
+            parts.append("rules=" + ",".join(f"{name}:{level}" for name, level in self.rule_levels))
+        if self.must_fix_min_severity != "S3":
+            parts.append(f"must_fix_min_severity={self.must_fix_min_severity}")
+        if self.overrides:
+            parts.append(f"override={len(self.overrides)}")
+        if self.preexisting != "recommend":
+            parts.append(f"preexisting={self.preexisting}")
         if self.budget_limits:
             parts.append(f"complexity_budget={len(self.budget_limits)}项")
         if self.extras:
@@ -140,6 +202,10 @@ class Policy:
                     "extension_points": list(self.extension_points),
                     "budget_limits": dict(self.budget_limits),
                     "extras": list(self.extras),
+                    "rule_levels": dict(self.rule_levels),
+                    "must_fix_min_severity": self.must_fix_min_severity,
+                    "overrides": [item.as_dict() for item in self.overrides],
+                    "preexisting": self.preexisting,
                 },
                 sort_keys=True,
                 ensure_ascii=False,
@@ -196,6 +262,64 @@ def _limits(table: dict) -> tuple[tuple[str, int], ...]:
     return tuple(found)
 
 
+def _severity(value: object, name: str) -> str:
+    text = str(value).strip()
+    if text not in SEVERITY_RANK:
+        raise PolicyError(f"{name} 只能是 S1、S2 或 S3")
+    return text
+
+
+def _rules(table: dict, name: str) -> list[tuple[str, str]]:
+    raw = table.get("rules", {})
+    if not isinstance(raw, dict):
+        raise PolicyError(f"{name}.rules 必须是表")
+    found: list[tuple[str, str]] = []
+    for rule, value in raw.items():
+        if rule not in CATALOG[name]:
+            raise PolicyError(f"{name}.rules 不认识 {rule}，可选：{'、'.join(CATALOG[name])}")
+        level = str(value).strip()
+        if level not in _LEVELS | {OFF}:
+            raise PolicyError(f"{name}.rules.{rule} 只能是 must_fix、recommend 或 off")
+        found.append((f"{name}.{rule}", level))
+    return found
+
+
+_OVERRIDE_KEYS = {"paths", "off", "level", "must_fix_min_severity"}
+
+
+def _overrides(data: dict) -> tuple[Override, ...]:
+    raw = data.get("override", [])
+    if not isinstance(raw, list):
+        raise PolicyError("override 必须写成 [[override]] 数组")
+    found: list[Override] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise PolicyError("override 的每一项必须是表")
+        unknown = sorted(set(item) - _OVERRIDE_KEYS)
+        if unknown:
+            raise PolicyError(f"override 不认识的键: {'、'.join(unknown)}")
+        paths = _globs(item, "paths")
+        if not paths:
+            raise PolicyError("override.paths 不能为空")
+        off = item.get("off", [])
+        if not isinstance(off, list) or not all(isinstance(entry, str) for entry in off):
+            raise PolicyError("override.off 必须是字符串数组")
+        for entry in off:
+            if not valid_selector(entry):
+                raise PolicyError(f"override.off 不认识 {entry}，写成 security 或 security.authz 这样的形式")
+        level = item.get("level")
+        floor = item.get("must_fix_min_severity")
+        found.append(
+            Override(
+                paths=paths,
+                off=tuple(off),
+                level=_level(level, default="") if level is not None else None,
+                must_fix_min_severity=_severity(floor, "override.must_fix_min_severity") if floor is not None else None,
+            )
+        )
+    return tuple(found)
+
+
 def policy_from_toml(text: str) -> Policy:
     try:
         data = tomllib.loads(text.removeprefix("\ufeff"))
@@ -228,6 +352,18 @@ def policy_from_toml(text: str) -> Policy:
         instruction = str(item.get("instruction") or "").strip()
         if enabled and instruction:
             extras.append(instruction)
+    tables = {
+        "correctness": correctness,
+        "secrets": secrets,
+        "performance": performance,
+        "security": security,
+        "compatibility": compatibility,
+        "simplicity": simplicity,
+    }
+    rule_levels = [pair for name, table in tables.items() for pair in _rules(table, name)]
+    preexisting = str(data.get("preexisting", "recommend")).strip()
+    if preexisting not in _PREEXISTING:
+        raise PolicyError("preexisting 只能是 recommend、keep 或 off")
     return Policy(
         source="base",
         fail_on_must_fix=fail,
@@ -248,6 +384,10 @@ def policy_from_toml(text: str) -> Policy:
         extension_points=_globs(simplicity, "extension_points"),
         budget_limits=_limits(budget),
         extras=tuple(extras),
+        rule_levels=tuple(rule_levels),
+        must_fix_min_severity=_severity(data.get("must_fix_min_severity", "S3"), "must_fix_min_severity"),
+        overrides=_overrides(data),
+        preexisting=preexisting,
     )
 
 

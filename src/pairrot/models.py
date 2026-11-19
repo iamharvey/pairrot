@@ -154,6 +154,7 @@ class Finding(BaseModel):
     introduced_in: IntroducedIn = IntroducedIn.unknown
     snippet: str = ""
     symbol: str = "unknown"
+    rule: str = ""
     level: str = ""
     replacement: str | None = None
     edits: list[str] = Field(default_factory=list)

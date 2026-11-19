@@ -30,10 +30,11 @@ from pairrot.models import (
 )
 from pairrot.redact import strip_secrets
 from pairrot.policy import Policy
+from pairrot.rules import CATALOG, rule_for
 from pairrot.snapshot import Snapshot, file_diff, run_git
 from pairrot.tools import RepoTools
 
-PROMPT_VERSION = "review-v12"
+PROMPT_VERSION = "review-v13"
 _NO_SHIMS = (
     "不兼容的改动默认是故意的。suggestion 不得提议增加兼容层、兜底分支、旧字段别名、旧格式解析、"
     "保留旧接口或双读双写，也不要把“没有兼容旧数据或旧调用方”本身当成缺陷。"
@@ -145,9 +146,29 @@ def prompt_for(policy: Policy, *, design: bool = False) -> str:
         )
     if design and policy.simplicity_enabled:
         lines.extend(_SIMPLICITY_RULES)
+    for table, category in _TAGGED[design]:
+        if category in categories:
+            lines.append(_rule_line(policy, table, category))
     if not design:
         lines.extend(policy.extras)
     return "\n".join(lines)
+
+
+_TAGGED = {
+    False: (("security", Category.security), ("performance", Category.performance)),
+    True: (("simplicity", Category.complexity),),
+}
+
+
+def _rule_line(policy: Policy, table: str, category: Category) -> str:
+    catalog = CATALOG[table]
+    live = policy.live_rules(table)
+    listed = "；".join(f"{rule}（{catalog[rule]}）" for rule in live)
+    line = f"每条 {category.value} 还要有 rule 字段，取值：{listed}。"
+    dead = [catalog[rule] for rule in catalog if rule not in live]
+    if dead:
+        line += f"这些不要报：{'；'.join(dead)}。"
+    return line
 
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 
@@ -544,6 +565,7 @@ def validate_candidate(
         introduced_in=introduced,
         snippet=normalize_snippet(snippet),
         symbol=symbol or "unknown",
+        rule=rule_for(category, raw.get("rule")),
         **simplification,
     )
     return finding, None

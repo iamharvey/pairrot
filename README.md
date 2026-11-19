@@ -406,6 +406,49 @@ instruction = "如果新增的外部调用没有超时，报 error_handling，�
 
 `[[extra]]` 只能让模型在已开启的类别里多注意某类问题，产出的发现仍然要过类别白名单和独立验证。所以写规则时要说明归到哪个类别，否则会被丢弃。
 
+### 子规则、按路径覆盖和降噪
+
+每个类别下面还有子规则，可以单独定级或关闭。没写到的子规则沿用所在表的 `level`：
+
+| 表 | 子规则 |
+|---|---|
+| `[correctness]` | `logic_error` 逻辑错误，`error_handling` 错误处理缺失 |
+| `[secrets]` | `private_key` 私钥，`token` 带固定前缀的令牌，`credential` 赋给 password、api_key 等变量的明文 |
+| `[security]` | `injection` 注入，`authz` 越权，`sensitive_data` 敏感数据外泄，`timing_compare` 非恒定时间比较，`other` |
+| `[performance]` | `n_plus_one` 循环里逐条查询，`quadratic` 平方复杂度，`repeated_io` 循环里重复读或解析，`other` |
+| `[compatibility]` | `contract_break` |
+| `[simplicity]` | `stdlib` 标准库可替代，`dead_code` 死代码，`needless_abstraction` 多余抽象，`duplicate` 重复实现，`ceremony` 多余的重试和兜底，`other` |
+
+```toml
+must_fix_min_severity = "S2"     # 低于 S2 的 must_fix 降为 recommend，不挡合并
+preexisting = "recommend"        # 改动前就存在的问题：recommend 只进摘要（默认）；keep 照常定级；off 不报
+
+[correctness]
+level = "must_fix"
+rules = { error_handling = "recommend" }   # 逻辑错误挡合并，错误处理只做参考
+
+[security]
+enabled = true
+rules = { timing_compare = "off", authz = "recommend" }
+
+[[override]]                     # 按路径覆盖，按书写顺序生效，后写的优先
+paths = ["tests/**", "fixtures/**"]
+off = ["secrets", "security.authz"]   # 写整个类别，或者 类别.子规则
+
+[[override]]
+paths = ["scripts/**"]
+level = "recommend"              # 这些路径上的意见都只进摘要
+
+[[override]]
+paths = ["payments/**"]
+must_fix_min_severity = "S3"     # 核心模块 S3 也挡合并
+```
+
+- **关掉的规则不花验证的钱**。全局关掉的子规则不会出现在评审提示词里；按路径关掉的，在送给验证者之前就丢弃。两种情况都会记在 `report.json` 的 `dropped` 里，原因是 `rule off in REVIEW.toml`。
+- **一个类别的子规则全部关掉，等于关掉这个类别**，这个视角的模型调用直接省掉。
+- **安全、性能、简化类意见**由评审模型标注 `rule`，标注不认识的子规则时归为 `other`。
+- **第一次接入时噪音少一些**：改动前就存在的问题默认不挡合并、只进摘要；没有 `REVIEW.toml` 时，这类问题也不会挂到行内。
+
 ### 故意不兼容与简化
 
 模型评审容易往两个方向把代码推复杂：建议为旧数据、旧调用方加兼容层，以及接受 AI 生成代码里多余的抽象和兜底。pairrot 对这两件事的处理：

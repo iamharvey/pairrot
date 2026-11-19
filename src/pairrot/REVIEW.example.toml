@@ -2,6 +2,8 @@
 # 提交并合进主干后，对之后的 PR 生效（规则只从 base 读取，只在工作区里的文件不生效）。
 # 先观察一两周：意见照常发到 PR，但不让 check 失败。觉得意见靠谱，再把 fail_on_must_fix 改成 true。
 fail_on_must_fix = false
+must_fix_min_severity = "S2"     # S3 的意见只进摘要，不挡合并
+preexisting = "recommend"        # 改动前就存在的问题只进摘要；想照常定级改成 keep
 
 [correctness]                    # 逻辑错误、错误处理缺失，挂到行内
 enabled = true
@@ -28,6 +30,11 @@ allow_break = []
 enabled = true
 level = "recommend"              # 先只做参考；有测试锁定、想让它挡合并时改成 must_fix
 extension_points = []            # 故意留的扩展点，例如 ["plugins/*"]
+
+# 按路径覆盖：例如测试夹具里的假密钥不报。子规则清单见 README
+# [[override]]
+# paths = ["tests/**"]
+# off = ["secrets"]
 
 # 复杂度预算：不调模型，设了哪项就按哪项把关，超出时 check 失败
 # [complexity_budget]
