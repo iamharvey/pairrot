@@ -19,6 +19,7 @@ from pairrot.models import (
     RunReport,
     RunStatus,
     TokenUsage,
+    norm_path,
 )
 from pairrot.pipeline import _apply_levels, _decide_status, _fail_reasons, _summary, _write_report
 from pairrot.policy import load_policy
@@ -46,7 +47,7 @@ def list_files(repo: Path, rev: str, prefix: str) -> tuple[list[str], list[FileS
     shown = run_git(repo, "ls-tree", "-r", "--name-only", rev)
     if shown.returncode != 0:
         raise GitError(shown.stderr.strip() or "git ls-tree failed")
-    wanted = prefix.strip("/")
+    wanted = norm_path(prefix).strip("/")
     chosen: list[str] = []
     skipped: list[FileSpan] = []
     for name in shown.stdout.splitlines():
@@ -312,10 +313,13 @@ def scan_tree(
         if policy.error:
             raise GitError(policy.error)
         known = load_baseline(baseline) if baseline else set()
-        files, skipped = list_files(root, pinned, path)
-        state = _load_state(state_path, pinned, path.strip("/"), policy.digest())
+        wanted = norm_path(path).strip("/")
+        files, skipped = list_files(root, pinned, wanted)
+        if wanted and not files and not skipped:
+            raise GitError(f"路径 {wanted} 下没有文件")
+        state = _load_state(state_path, pinned, wanted, policy.digest())
         if not state:
-            state = _blank_state(pinned, path.strip("/"), policy.digest(), files, skipped)
+            state = _blank_state(pinned, wanted, policy.digest(), files, skipped)
     except (GitError, ValueError) as exc:
         report = RunReport(
             status=RunStatus.failed,

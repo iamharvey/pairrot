@@ -28,6 +28,8 @@ def is_secret(finding: Finding) -> bool:
 
 def save_baseline(path: Path | str, fingerprints: set[str], *, rev: str) -> None:
     file = Path(path)
+    if not fingerprints and file.is_file() and load_baseline(file):
+        raise ValueError(f"{file} 已有基线，这次没有可写入的指纹，没有覆盖")
     file.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "rev": rev,

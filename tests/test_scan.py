@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from pairrot.baseline import load_baseline, save_baseline, without_baseline
 from pairrot.llm import ChatMessage, Completion, FakeModel
 from pairrot.models import Budget
@@ -185,7 +187,33 @@ def test_list_files_keeps_the_prefix(tmp_path: Path):
     repo, rev = _repo(tmp_path)
     chosen, skipped = list_files(repo, rev, "src")
     assert chosen == ["src/c.py"]
+    assert list_files(repo, rev, "./src/")[0] == ["src/c.py"]
     assert skipped == []
+
+
+def test_a_missing_path_does_not_erase_the_baseline(tmp_path: Path):
+    repo, rev = _repo(tmp_path)
+    target = tmp_path / "base.json"
+    save_baseline(target, {"keep"}, rev=rev)
+    report = scan_tree(
+        repo,
+        rev,
+        tmp_path / "out",
+        path="./missing",
+        llm=_model([]),
+        save_baseline_to=target,
+    )
+    assert report.status.value == "failed"
+    assert "missing" in (report.error or "")
+    assert load_baseline(target) == {"keep"}
+
+
+def test_an_empty_save_does_not_replace_an_existing_baseline(tmp_path: Path):
+    target = tmp_path / "base.json"
+    save_baseline(target, {"keep"}, rev="a" * 40)
+    with pytest.raises(ValueError):
+        save_baseline(target, set(), rev="a" * 40)
+    assert load_baseline(target) == {"keep"}
 
 
 def test_the_cost_cap_adds_up_across_files(tmp_path: Path):
