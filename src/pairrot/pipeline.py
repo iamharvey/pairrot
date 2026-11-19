@@ -24,6 +24,7 @@ from pairrot.models import (
     dump_model,
 )
 from pairrot.policy import Policy, load_policy
+from pairrot.rules import OFF
 from pairrot.review import PROMPT_VERSION, load_sources, prompt_for, review_diff
 from pairrot.secrets_scan import scan_added_secrets
 from pairrot.simplify import gate_simplifications
@@ -174,21 +175,29 @@ def _empty_report(
     )
 
 
-def _apply_levels(findings: list[Finding], policy: Policy) -> list[Finding]:
+def _apply_levels(findings: list[Finding], policy: Policy) -> tuple[list[Finding], list[DroppedCandidate]]:
     if not policy.active:
-        return findings
-    return [
-        finding.model_copy(
-            update={
-                "level": policy.level_for(
-                    finding.category,
-                    secret=_is_secret(finding),
-                    locked=bool(finding.locked_by) and finding.replacement is not None,
-                )
-            }
+        return findings, []
+    kept: list[Finding] = []
+    dropped: list[DroppedCandidate] = []
+    for finding in findings:
+        level, reason = policy.grade(
+            finding,
+            secret=_is_secret(finding),
+            locked=bool(finding.locked_by) and finding.replacement is not None,
         )
-        for finding in findings
-    ]
+        if level == OFF:
+            dropped.append(
+                DroppedCandidate(
+                    reason=reason,
+                    category=finding.category.value,
+                    file=finding.location.file,
+                    trigger=finding.trigger,
+                )
+            )
+            continue
+        kept.append(finding.model_copy(update={"level": level}))
+    return kept, dropped
 
 
 def _fail_reasons(policy: Policy, confirmed: list[Finding], exceeded: list[str]) -> list[str]:
@@ -380,6 +389,8 @@ def review_change(
                 diffs.update(pass_diffs)
                 packs.update(pass_packs)
             findings, duplicates = _dedupe(findings)
+            findings, ruled_off = _apply_levels(findings, policy)
+            duplicates += ruled_off
             findings, gated = gate_simplifications(
                 findings,
                 policy=policy,
@@ -411,9 +422,10 @@ def review_change(
                 pending = [mark_undecided(finding, reason) for finding in pending]
             findings = held + pending
 
-    if policy.active and policy.secrets_enabled and snapshot.reviewed:
+    if policy.scans_secrets() and snapshot.reviewed:
         findings = scan_added_secrets(root, snapshot) + findings
-    findings = _apply_levels(findings, policy)
+    findings, ruled_off = _apply_levels(findings, policy)
+    dropped = dropped + ruled_off
 
     confirmed = []
     rejected = []

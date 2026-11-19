@@ -13,6 +13,12 @@ level = "must_fix"
 enabled = true
 level = "must_fix"
 
+# Test fixtures intentionally contain fake secrets. The scanner only looks at added lines,
+# so a new or rewritten fixture would otherwise fail the check.
+[[override]]
+paths = ["tests/**"]
+off = ["secrets"]
+
 [security]
 enabled = true
 level = "must_fix"

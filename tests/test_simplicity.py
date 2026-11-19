@@ -124,9 +124,18 @@ max_net_added = 400
     assert not policy.is_stable("api/v1_orders.py")
     assert not policy.is_stable("app/users.py")
     assert dict(policy.budget_limits) == {"max_single_use": 3, "max_net_added": 400}
-    assert policy.level_for(Category.complexity, locked=True) == "must_fix"
-    assert policy.level_for(Category.complexity, locked=False) == "recommend"
-    assert policy.level_for(Category.contract_break) == "must_fix"
+    def sample(category: Category) -> Finding:
+        return Finding(
+            fingerprint="x",
+            category=category,
+            severity=Severity.S2,
+            location=Location(file="app.py", start_line=1, end_line=1),
+            trigger="t",
+        )
+
+    assert policy.decide(sample(Category.complexity), locked=True) == "must_fix"
+    assert policy.decide(sample(Category.complexity), locked=False) == "recommend"
+    assert policy.decide(sample(Category.contract_break)) == "must_fix"
     with pytest.raises(PolicyError):
         policy_from_toml("[complexity_budget]\nmax_lines = 3\n")
     with pytest.raises(PolicyError):

@@ -14,7 +14,16 @@ from pathlib import Path
 
 import httpx
 
-from pairrot.models import CATEGORY_FROM_LABEL, Category, ComplexityStats, Finding, RunReport, Severity, norm_path
+from pairrot.models import (
+    CATEGORY_FROM_LABEL,
+    Category,
+    ComplexityStats,
+    Finding,
+    IntroducedIn,
+    RunReport,
+    Severity,
+    norm_path,
+)
 
 SUMMARY_MARKER = "<!-- pairrot-summary -->"
 OVERRIDE_LABEL = "pairrot-override"
@@ -266,6 +275,9 @@ def plan_publication(
             continue
         if finding.severity == Severity.S3:
             summary_only.append(_one_line(finding, ""))
+            continue
+        if finding.introduced_in == IntroducedIn.preexisting:
+            summary_only.append(_one_line(finding, "改动前已存在"))
             continue
         if line is None:
             summary_only.append(_one_line(finding, "不在本次 diff 的可评论行上"))

@@ -18,6 +18,7 @@ from pairrot.models import (
     norm_path,
 )
 from pairrot.redact import secret_name
+from pairrot.rules import secret_rule
 from pairrot.snapshot import Snapshot, file_diff
 
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)")
@@ -78,6 +79,7 @@ def scan_added_secrets(repo: Path, snapshot: Snapshot) -> list[Finding]:
                     introduced_in=IntroducedIn.this_change,
                     snippet=snippet,
                     symbol=symbol,
+                    rule=secret_rule(label),
                 )
             )
     return findings
