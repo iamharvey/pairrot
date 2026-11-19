@@ -52,7 +52,7 @@ def secret_finding(path: str, line_no: int, label: str, symbol: str) -> Finding:
         category=Category.security,
         severity=Severity.S2,
         location=Location(file=path, start_line=line_no, end_line=line_no),
-        title="疑似密钥" if symbol else "新增了疑似密钥",
+        title="疑似密钥",
         trigger=f"赋值 {label}，值已隐藏。",
         consequence="明文密钥会进入仓库历史，轮换之前一直有效。",
         suggestion="去掉明文，改为运行时注入的环境变量或密钥管理。",

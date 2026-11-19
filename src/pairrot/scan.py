@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pairrot.baseline import load_baseline, save_baseline, without_baseline
+from pairrot.baseline import is_secret, load_baseline, save_baseline, without_baseline
 from pairrot.budget import BudgetTracker, Clock
 from pairrot.evidence import render_pack
 from pairrot.llm import ChatMessage, LLM, client_from_env
@@ -18,6 +18,7 @@ from pairrot.models import (
     IntroducedIn,
     RunReport,
     RunStatus,
+    TokenUsage,
 )
 from pairrot.pipeline import _apply_levels, _decide_status, _fail_reasons, _summary, _write_report
 from pairrot.policy import load_policy
@@ -249,7 +250,7 @@ def _report_from(
     if state["pending"] and status == RunStatus.passed:
         status = RunStatus.partial
     fail_reasons = _fail_reasons(policy, confirmed, [])
-    previous = state["tokens"]
+    usage = state["tokens"]
     return RunReport(
         status=status,
         base_sha=rev,
@@ -267,14 +268,12 @@ def _report_from(
         undecided=undecided,
         summary=_summary(undecided),
         elapsed_seconds=round(elapsed, 3),
-        tokens=tracker.tokens.model_copy(
-            update={
-                "prompt_tokens": tracker.tokens.prompt_tokens + previous["prompt_tokens"],
-                "completion_tokens": tracker.tokens.completion_tokens + previous["completion_tokens"],
-                "total": tracker.tokens.total + previous["total"],
-            }
+        tokens=TokenUsage(
+            prompt_tokens=usage["prompt_tokens"],
+            completion_tokens=usage["completion_tokens"],
+            total=usage["total"],
         ),
-        cost=round(tracker.cost + state["cost"], 6),
+        cost=round(state["cost"], 6),
         budget_exhausted=tracker.exhausted,
         partial_reasons=reasons,
         dropped=dropped,
@@ -335,7 +334,17 @@ def scan_tree(
     model = llm if llm is not None else client_from_env()
     tracker = BudgetTracker(budget, active_clock)
     tools = RepoTools(root, pinned, pinned, max_calls=budget.max_tool_calls_per_perspective)
+    prior_cost = state["cost"]
+    prior_tokens = dict(state["tokens"])
     batch = 0
+
+    def note_usage() -> None:
+        state["cost"] = prior_cost + tracker.cost
+        state["tokens"] = {
+            "prompt_tokens": prior_tokens["prompt_tokens"] + tracker.tokens.prompt_tokens,
+            "completion_tokens": prior_tokens["completion_tokens"] + tracker.tokens.completion_tokens,
+            "total": prior_tokens["total"] + tracker.tokens.total,
+        }
     while state["pending"] and batch < budget.max_files and tracker.allow_model_call() and not tracker.error:
         current = state["pending"][0]
         text = _file_text(root, pinned, current)
@@ -369,18 +378,10 @@ def scan_tree(
         state["done"].append(current)
         state["pending"].pop(0)
         batch += 1
-        state["tokens"] = {
-            "prompt_tokens": state["tokens"]["prompt_tokens"] + tracker.tokens.prompt_tokens,
-            "completion_tokens": state["tokens"]["completion_tokens"] + tracker.tokens.completion_tokens,
-            "total": state["tokens"]["total"] + tracker.tokens.total,
-        }
-        state["cost"] = state["cost"] + tracker.cost
-        tracker.tokens.prompt_tokens = 0
-        tracker.tokens.completion_tokens = 0
-        tracker.tokens.total = 0
-        tracker.cost = 0.0
+        note_usage()
         state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
+    note_usage()
     report = _report_from(
         state=state,
         rev=pinned,
@@ -394,10 +395,12 @@ def scan_tree(
     )
     if save_baseline_to:
         if state["pending"]:
-            report = report.model_copy(update={"error": "体检还没完成，不能写基线"})
-            report = report.model_copy(update={"status": RunStatus.partial})
+            report = report.model_copy(update={"error": "体检还没完成，不能写基线", "status": RunStatus.partial})
         else:
-            fingerprints = known | {item.fingerprint for item in report.confirmed}
-            save_baseline(save_baseline_to, fingerprints, rev=pinned)
+            fingerprints = known | {item.fingerprint for item in report.confirmed if not is_secret(item)}
+            try:
+                save_baseline(save_baseline_to, fingerprints, rev=pinned)
+            except ValueError as exc:
+                report = report.model_copy(update={"error": str(exc)})
     _write_report(report, destination)
     return report

@@ -21,13 +21,22 @@ def load_baseline(path: Path | str) -> set[str]:
     return set(raw)
 
 
+def is_secret(finding: Finding) -> bool:
+    """Secret findings stay out of the baseline: the fingerprint has no line or value, so a new secret would match an old one."""
+    return finding.verification is not None and "secret_pattern" in finding.verification.checked
+
+
 def save_baseline(path: Path | str, fingerprints: set[str], *, rev: str) -> None:
     file = Path(path)
+    file.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "rev": rev,
         "fingerprints": sorted(fingerprints),
     }
-    file.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    try:
+        file.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"写不了基线 {file}: {exc}") from exc
 
 
 def baseline_digest(fingerprints: set[str]) -> str:
@@ -45,7 +54,7 @@ def without_baseline(
     kept: list[Finding] = []
     dropped: list[DroppedCandidate] = []
     for finding in findings:
-        if finding.fingerprint not in known:
+        if is_secret(finding) or finding.fingerprint not in known:
             kept.append(finding)
             continue
         dropped.append(
