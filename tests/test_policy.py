@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
-from pairrot.cli import exit_code
+from pairrot.cli import exit_code, load_dotenv, main
+from pairrot.policy import policy_from_toml
 from pairrot.llm import ChatMessage, Completion, FakeModel
 from pairrot.models import (
     Budget,
@@ -275,3 +277,56 @@ def test_leveled_summary_keeps_recommend_off_the_diff(tmp_path: Path):
     assert "边界少了一次" in planned.summary
     assert "建议" in planned.summary
     assert "不因意见失败" in planned.summary
+
+
+def test_a_policy_saved_with_a_bom_and_crlf_still_applies(tmp_path: Path):
+    toml = "\ufeff[secrets]\r\nenabled = true\r\nlevel = \"must_fix\"\r\n"
+    repo, base, tip = _repo(tmp_path, toml, _SECRET, toml_on_base=True)
+    report = review_change(repo, base, tip, tmp_path / "out", llm=_quiet())
+    assert report.policy_source == "base"
+    assert [item.title for item in report.confirmed] == ["新增了疑似密钥"]
+
+
+def test_a_lowercase_policy_file_fails_with_its_name(tmp_path: Path, capsys):
+    repo = init_repo(tmp_path / "repo")
+    write(repo, "app.py", "x = 1\n")
+    write(repo, "review.toml", "[secrets]\nenabled = true\n")
+    base = commit(repo, "base")
+    write(repo, "app.py", _SECRET)
+    tip = commit(repo, "head")
+    code = main(["review", "--repo", str(repo), "--base", base, "--head", tip, "--out", str(tmp_path / "out")])
+    assert code == 1
+    assert "base 上是 review.toml" in capsys.readouterr().err
+
+
+def test_init_writes_the_starter_policy_and_keeps_an_existing_one(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    assert main(["init", "--repo", str(repo)]) == 0
+    written = (repo / "REVIEW.toml").read_bytes()
+    assert b"\r\n" not in written and not written.startswith(b"\xef\xbb\xbf")
+    assert policy_from_toml(written.decode("utf-8")).secrets_enabled
+    (repo / "REVIEW.toml").write_text("fail_on_must_fix = true\n", encoding="utf-8")
+    assert main(["init", "--repo", str(repo)]) == 1
+    assert "已存在" in capsys.readouterr().err
+    assert (repo / "REVIEW.toml").read_text(encoding="utf-8") == "fail_on_must_fix = true\n"
+    assert main(["init", "--repo", str(repo), "--force"]) == 0
+    assert (repo / "REVIEW.toml").read_bytes() == written
+
+
+def test_review_says_when_the_policy_is_only_in_the_worktree(tmp_path: Path, capsys, monkeypatch):
+    repo, base, tip = _repo(tmp_path, None, "def clamp(value, low, high):\n    return low\n", toml_on_base=True)
+    (repo / "REVIEW.toml").write_text("[secrets]\nenabled = true\n", encoding="utf-8")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("pairrot.cli.review_change", lambda *a, **k: review_change(*a, **k, llm=_quiet()))
+    main(["review", "--repo", str(repo), "--base", base, "--head", tip, "--out", str(tmp_path / "out")])
+    assert "base 上没有" in capsys.readouterr().err
+
+
+def test_dotenv_saved_with_a_bom_keeps_its_first_key(tmp_path: Path, monkeypatch):
+    env = tmp_path / ".env"
+    env.write_bytes("\ufeffPAIRROT_TEST_KEY=value\r\n".encode("utf-8"))
+    monkeypatch.delenv("PAIRROT_TEST_KEY", raising=False)
+    monkeypatch.delenv("PAIRROT_DISABLE_DOTENV", raising=False)
+    load_dotenv(env)
+    assert os.environ.pop("PAIRROT_TEST_KEY") == "value"
