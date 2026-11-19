@@ -208,6 +208,49 @@ def test_a_missing_path_does_not_erase_the_baseline(tmp_path: Path):
     assert load_baseline(target) == {"keep"}
 
 
+def test_a_state_write_failure_still_writes_the_report(tmp_path: Path, monkeypatch):
+    repo = init_repo(tmp_path / "repo")
+    write(repo, "big.py", "x = 1\n" * 1501)
+    rev = commit(repo, "base")
+    real_write = Path.write_text
+
+    def guarded(self, text, *args, **kwargs):
+        if self.name.startswith("scan_state.json"):
+            raise OSError("disk full")
+        return real_write(self, text, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", guarded)
+    report = scan_tree(repo, rev, tmp_path / "out", llm=_model([]), budget=Budget(max_files=5))
+    assert report.status.value == "failed"
+    assert "disk full" in (report.error or "")
+    assert (tmp_path / "out" / "report.json").is_file()
+
+
+def test_a_baseline_write_failure_fails_the_run(tmp_path: Path):
+    repo, rev = _repo(tmp_path)
+    target = tmp_path / "base.json"
+    save_baseline(target, {"keep"}, rev=rev)
+
+    def quiet(messages, model):
+        return Completion(
+            message=ChatMessage(role="assistant", content='{"findings": []}'),
+            prompt_tokens=1,
+            completion_tokens=1,
+        )
+
+    report = scan_tree(
+        repo,
+        rev,
+        tmp_path / "out",
+        llm=FakeModel(quiet),
+        budget=Budget(max_files=10),
+        save_baseline_to=target,
+    )
+    assert report.status.value == "failed"
+    assert "没有覆盖" in (report.error or "")
+    assert load_baseline(target) == {"keep"}
+
+
 def test_an_empty_save_does_not_replace_an_existing_baseline(tmp_path: Path):
     target = tmp_path / "base.json"
     save_baseline(target, {"keep"}, rev="a" * 40)

@@ -350,9 +350,23 @@ def scan_tree(
             "total": prior_tokens["total"] + tracker.tokens.total,
         }
 
-    def persist() -> None:
+    disk_error = ""
+
+    def persist() -> bool:
+        """Write the state via a temporary file. False means the disk write failed and the scan must stop."""
+        nonlocal disk_error
         note_usage()
-        state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if disk_error:
+            return False
+        payload = json.dumps(state, ensure_ascii=False, indent=2) + "\n"
+        temporary = state_path.with_name(state_path.name + ".tmp")
+        try:
+            temporary.write_text(payload, encoding="utf-8")
+            temporary.replace(state_path)
+        except OSError as exc:
+            disk_error = f"写不了体检进度 {state_path.name}: {exc}"
+            return False
+        return True
 
     while state["pending"] and batch < budget.max_files and tracker.allow_model_call() and not tracker.error:
         current = state["pending"][0]
@@ -361,7 +375,8 @@ def scan_tree(
             reason = "二进制文件" if text is None else f"超过 {_MAX_LINES} 行"
             state["skipped"].append(FileSpan(path=current, status="A", reason=reason).model_dump(mode="json"))
             state["pending"].pop(0)
-            persist()
+            if not persist():
+                break
             continue
         secrets = _secrets(current, text) if policy.scans_secrets() else []
         found, lost, finished = _scan_file(
@@ -383,7 +398,8 @@ def scan_tree(
         state["done"].append(current)
         state["pending"].pop(0)
         batch += 1
-        persist()
+        if not persist():
+            break
 
     persist()
     report = _report_from(
@@ -397,12 +413,14 @@ def scan_tree(
         known=known,
         elapsed=active_clock.elapsed(),
     )
-    if save_baseline_to and not state["pending"]:
+    if disk_error:
+        report = report.model_copy(update={"error": disk_error, "status": RunStatus.failed})
+    if save_baseline_to and not state["pending"] and not report.error:
         fingerprints = known | {item.fingerprint for item in report.confirmed if not is_secret(item)}
         try:
             save_baseline(save_baseline_to, fingerprints, rev=pinned)
         except ValueError as exc:
-            report = report.model_copy(update={"error": str(exc)})
+            report = report.model_copy(update={"error": str(exc), "status": RunStatus.failed})
     elif save_baseline_to and not report.error:
         report = report.model_copy(update={"error": "体检还没完成，不能写基线", "status": RunStatus.partial})
     _write_report(report, destination)
