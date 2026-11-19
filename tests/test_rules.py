@@ -119,6 +119,12 @@ must_fix_min_severity = "S3"
     assert policy.decide(_finding(Category.security, rule="injection", severity=Severity.S3, file="core/a.py")) == "must_fix"
 
 
+def test_dropping_a_preexisting_finding_says_so():
+    old = _finding(Category.logic_error, rule="logic_error", severity=Severity.S1, introduced=IntroducedIn.preexisting)
+    policy = policy_from_toml('preexisting = "off"\n[correctness]\nlevel = "must_fix"\n')
+    assert policy.grade(old) == ("off", "preexisting off in REVIEW.toml")
+
+
 def test_preexisting_findings_stay_out_of_must_fix_unless_kept():
     old = _finding(Category.logic_error, rule="logic_error", severity=Severity.S1, introduced=IntroducedIn.preexisting)
     base = '[correctness]\nlevel = "must_fix"\n'
@@ -233,7 +239,7 @@ off = ["secrets"]
     assert calls["verify"] == 0
     reasons = [(item.reason, item.file) for item in report.dropped]
     assert ("rule off in REVIEW.toml", "app.py") in reasons
-    assert ("rule off in REVIEW.toml", "tests/test_app.py") in reasons
+    assert ("path override in REVIEW.toml", "tests/test_app.py") in reasons
 
 
 def test_without_policy_preexisting_findings_stay_out_of_inline_comments():

@@ -116,29 +116,39 @@ class Policy:
 
     def decide(self, finding: Finding, *, secret: bool = False, locked: bool = False) -> str:
         """must_fix, recommend or off for one finding, after rules, path overrides and the severity floor."""
+        return self.grade(finding, secret=secret, locked=locked)[0]
+
+    def grade(self, finding: Finding, *, secret: bool = False, locked: bool = False) -> tuple[str, str]:
+        """The level, and why it is off. The reason is empty unless the level is off."""
         table = table_of(finding.category, secret=secret)
         if table is None:
-            return "recommend"
+            return "recommend", ""
         level = self.rule_level(table, finding.rule)
+        reason = "rule off in REVIEW.toml" if level == OFF else ""
         floor = self.must_fix_min_severity
         for override in self.overrides:
             if not matches(finding.location.file, override.paths):
                 continue
             if override.turns_off(table, finding.rule):
-                level = OFF
+                level, reason = OFF, "path override in REVIEW.toml"
             elif override.level and level != OFF:
                 level = override.level
             if override.must_fix_min_severity:
                 floor = override.must_fix_min_severity
         if finding.introduced_in == IntroducedIn.preexisting and self.preexisting != "keep":
-            level = OFF if self.preexisting == OFF else min(level, "recommend", key=_LEVEL_ORDER.index)
+            if self.preexisting == OFF:
+                if level != OFF:
+                    reason = "preexisting off in REVIEW.toml"
+                level = OFF
+            else:
+                level = min(level, "recommend", key=_LEVEL_ORDER.index)
         if level == OFF:
-            return OFF
+            return OFF, reason
         if table == "simplicity" and not locked:
-            return "recommend"
+            return "recommend", ""
         if level == "must_fix" and SEVERITY_RANK[finding.severity.value] > SEVERITY_RANK[floor]:
-            return "recommend"
-        return level
+            return "recommend", ""
+        return level, ""
 
     def design_categories(self) -> frozenset[Category]:
         return self.llm_categories() & {Category.contract_break, Category.complexity}

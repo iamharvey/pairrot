@@ -181,7 +181,7 @@ def _apply_levels(findings: list[Finding], policy: Policy) -> tuple[list[Finding
     kept: list[Finding] = []
     dropped: list[DroppedCandidate] = []
     for finding in findings:
-        level = policy.decide(
+        level, reason = policy.grade(
             finding,
             secret=_is_secret(finding),
             locked=bool(finding.locked_by) and finding.replacement is not None,
@@ -189,7 +189,7 @@ def _apply_levels(findings: list[Finding], policy: Policy) -> tuple[list[Finding
         if level == OFF:
             dropped.append(
                 DroppedCandidate(
-                    reason="rule off in REVIEW.toml",
+                    reason=reason,
                     category=finding.category.value,
                     file=finding.location.file,
                     trigger=finding.trigger,

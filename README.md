@@ -444,7 +444,7 @@ paths = ["payments/**"]
 must_fix_min_severity = "S3"     # 核心模块 S3 也挡合并
 ```
 
-- **关掉的规则不花验证的钱**。全局关掉的子规则不会出现在评审提示词里；按路径关掉的，在送给验证者之前就丢弃。两种情况都会记在 `report.json` 的 `dropped` 里，原因是 `rule off in REVIEW.toml`。
+- **关掉的规则不花验证的钱**。全局关掉的子规则不会出现在评审提示词里；按路径关掉的，在送给验证者之前就丢弃。`report.json` 的 `dropped` 写明原因：`rule off in REVIEW.toml` 是子规则关闭，`path override in REVIEW.toml` 是路径覆盖，`preexisting off in REVIEW.toml` 是 `preexisting = "off"`。
 - **一个类别的子规则全部关掉，等于关掉这个类别**，这个视角的模型调用直接省掉。
 - **安全、性能、简化类意见**由评审模型标注 `rule`，标注不认识的子规则时归为 `other`。
 - **第一次接入时噪音少一些**：改动前就存在的问题默认不挡合并、只进摘要；没有 `REVIEW.toml` 时，这类问题也不会挂到行内。
