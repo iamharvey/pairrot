@@ -24,8 +24,10 @@ from pairrot.models import (
     dump_model,
 )
 from pairrot.baseline import baseline_digest, load_baseline, without_baseline
-from pairrot.policy import Policy, load_policy, load_policy_file
-from pairrot.rules import OFF
+from pairrot.injection_scan import guard_findings, scan_added_injections
+from pairrot.policy import Policy, injection_weakened, load_policy, load_policy_file
+from pairrot.risky_scan import scan_added_risky
+from pairrot.rules import OFF, checked_table
 from pairrot.review import PROMPT_VERSION, load_sources, prompt_for, review_diff
 from pairrot.secrets_scan import scan_added_secrets
 from pairrot.simplify import gate_simplifications
@@ -184,9 +186,13 @@ def _apply_levels(findings: list[Finding], policy: Policy) -> tuple[list[Finding
     kept: list[Finding] = []
     dropped: list[DroppedCandidate] = []
     for finding in findings:
+        checked = finding.verification.checked if finding.verification else ()
+        if _is_guard(finding):
+            kept.append(finding.model_copy(update={"level": "must_fix"}))
+            continue
         level, reason = policy.grade(
             finding,
-            secret=_is_secret(finding),
+            table=checked_table(checked),
             locked=bool(finding.locked_by) and finding.replacement is not None,
         )
         if level == OFF:
@@ -204,10 +210,12 @@ def _apply_levels(findings: list[Finding], policy: Policy) -> tuple[list[Finding
 
 
 def _fail_reasons(policy: Policy, confirmed: list[Finding], exceeded: list[str]) -> list[str]:
-    if not policy.active:
-        return []
     reasons: list[str] = []
-    if policy.fail_on_must_fix and any(item.level == "must_fix" for item in confirmed):
+    if any(_is_guard(item) for item in confirmed):
+        reasons.append("关闭了提示词注入检查，需要维护者确认")
+    if not policy.active:
+        return reasons
+    if policy.fail_on_must_fix and any(item.level == "must_fix" and not _is_guard(item) for item in confirmed):
         reasons.append("存在必须处理的意见")
     if exceeded:
         reasons.append("复杂度预算超限：" + "；".join(exceeded))
@@ -236,8 +244,8 @@ def _dedupe(findings: list[Finding]) -> tuple[list[Finding], list[DroppedCandida
     return list(best.values()), dropped
 
 
-def _is_secret(finding: Finding) -> bool:
-    return finding.verification is not None and "secret_pattern" in finding.verification.checked
+def _is_guard(finding: Finding) -> bool:
+    return finding.verification is not None and "policy_guard" in finding.verification.checked
 
 
 def review_change(
@@ -443,11 +451,19 @@ def review_change(
                 pending = [mark_undecided(finding, reason) for finding in pending]
             findings = held + pending
 
+    if policy.scans_prompt_injection():
+        findings = scan_added_injections(root, snapshot, policy) + findings
+    if policy.scans_risky_patterns() and snapshot.reviewed:
+        findings = scan_added_risky(root, snapshot, policy) + findings
     if policy.scans_secrets() and snapshot.reviewed:
         findings = scan_added_secrets(root, snapshot) + findings
     findings, ruled_off = _apply_levels(findings, policy)
     findings, known_dropped = without_baseline(findings, known)
     dropped = dropped + ruled_off + known_dropped
+    if not policy_file:
+        head_policy = load_policy(root, head_sha)
+        if not head_policy.error:
+            findings = guard_findings(root, head_sha, injection_weakened(policy, head_policy)) + findings
 
     confirmed = []
     rejected = []

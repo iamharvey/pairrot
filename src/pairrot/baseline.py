@@ -21,6 +21,10 @@ def load_baseline(path: Path | str) -> set[str]:
     return set(raw)
 
 
+def _is_guard(finding: Finding) -> bool:
+    return finding.verification is not None and "policy_guard" in finding.verification.checked
+
+
 def is_secret(finding: Finding) -> bool:
     """Secret findings stay out of the baseline: the fingerprint has no line or value, so a new secret would match an old one."""
     return finding.verification is not None and "secret_pattern" in finding.verification.checked
@@ -56,7 +60,7 @@ def without_baseline(
     kept: list[Finding] = []
     dropped: list[DroppedCandidate] = []
     for finding in findings:
-        if is_secret(finding) or finding.fingerprint not in known:
+        if is_secret(finding) or _is_guard(finding) or finding.fingerprint not in known:
             kept.append(finding)
             continue
         dropped.append(

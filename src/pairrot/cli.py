@@ -92,7 +92,10 @@ def _cmd_review(args: argparse.Namespace) -> int:
     if report.error:
         print(f"error: {report.error}", file=sys.stderr)
     if report.policy_source == "local":
-        print("note: 使用了本地规则，CI 不会用这份 REVIEW.toml", file=sys.stderr)
+        print(
+            "note: 使用了本地规则，CI 不会用这份 REVIEW.toml。提示词注入有没有被关掉，只比较 base 和 head 上的 REVIEW.toml",
+            file=sys.stderr,
+        )
     hint = _policy_hint(report, Path(args.repo))
     if hint:
         print(hint, file=sys.stderr)

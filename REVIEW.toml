@@ -17,7 +17,11 @@ level = "must_fix"
 # so a new or rewritten fixture would otherwise fail the check.
 [[override]]
 paths = ["tests/**"]
-off = ["secrets"]
+off = ["secrets", "risky_patterns"]
+
+[risky_patterns]
+enabled = true
+level = "recommend"
 
 [security]
 enabled = true

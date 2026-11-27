@@ -16,6 +16,7 @@ class Category(str, Enum):
     data_consistency = "data_consistency"
     concurrency = "concurrency"
     contract_break = "contract_break"
+    claim_mismatch = "claim_mismatch"
     error_handling = "error_handling"
     security = "security"
     performance = "performance"
@@ -31,6 +32,7 @@ CATEGORY_FROM_LABEL: dict[str, Category] = {
     "数据一致性": Category.data_consistency,
     "并发与时序": Category.concurrency,
     "跨模块契约破坏": Category.contract_break,
+    "声明与实现不一致": Category.claim_mismatch,
     "错误处理缺失": Category.error_handling,
     "安全与权限": Category.security,
     "性能后果": Category.performance,

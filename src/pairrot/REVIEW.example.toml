@@ -13,6 +13,16 @@ level = "must_fix"
 enabled = true
 level = "must_fix"
 
+# 提示词注入检查默认开启，即使不写这一段也会跑。exclude 不能关掉它。
+# 要关掉必须写 enabled = false，而这次改动会在评审里标成【危险】，需要维护者加 pairrot-override。
+# [prompt_injection]
+# enabled = true
+# level = "must_fix"
+
+[risky_patterns]                 # 确定性的不安全写法，只进摘要，不判断能不能被利用
+enabled = true
+level = "recommend"
+
 [security]                       # 注入、越权、敏感数据进日志等，需写明攻击者可控的输入
 enabled = true
 level = "must_fix"

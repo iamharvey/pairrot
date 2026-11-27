@@ -10,14 +10,31 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from pairrot.models import CORRECTNESS_CATEGORIES, Category, Finding, IntroducedIn, norm_path
-from pairrot.rules import CATALOG, OFF, SEVERITY_RANK, table_of, valid_selector
+from pairrot.rules import (
+    CATALOG,
+    DEFAULT_INSTRUCTION_PATHS,
+    DEFAULT_RULE_LEVELS,
+    OFF,
+    SEVERITY_RANK,
+    table_of,
+    valid_selector,
+)
 from pairrot.snapshot import run_git
 
 POLICY_FILE = "REVIEW.toml"
 _LEVELS = {"must_fix", "recommend"}
 _PREEXISTING = {"recommend", "keep", OFF}
 _LEVEL_ORDER = [OFF, "recommend", "must_fix"]
-_TABLES = ("correctness", "secrets", "performance", "security", "compatibility", "simplicity")
+_TABLES = (
+    "correctness",
+    "secrets",
+    "prompt_injection",
+    "risky_patterns",
+    "performance",
+    "security",
+    "compatibility",
+    "simplicity",
+)
 BUDGET_LIMITS = ("max_net_added", "max_new_files", "max_new_symbols", "max_single_use", "max_new_env_reads")
 
 
@@ -63,6 +80,11 @@ class Policy:
     performance_level: str = "recommend"
     security_enabled: bool = False
     security_level: str = "must_fix"
+    prompt_injection_enabled: bool = True
+    prompt_injection_level: str = "must_fix"
+    injection_paths: tuple[str, ...] = ()
+    risky_patterns_enabled: bool = False
+    risky_patterns_level: str = "recommend"
     compatibility_enabled: bool = False
     compatibility_level: str = "must_fix"
     stable: tuple[str, ...] = ()
@@ -90,7 +112,13 @@ class Policy:
         """must_fix, recommend or off for one rule, before path overrides."""
         if not self.table_enabled(table):
             return OFF
-        return dict(self.rule_levels).get(f"{table}.{rule}", getattr(self, f"{table}_level"))
+        key = f"{table}.{rule}"
+        explicit = dict(self.rule_levels)
+        if key in explicit:
+            return explicit[key]
+        if key in DEFAULT_RULE_LEVELS:
+            return DEFAULT_RULE_LEVELS[key]
+        return getattr(self, f"{table}_level")
 
     def live_rules(self, table: str) -> list[str]:
         return [rule for rule in CATALOG[table] if self.rule_level(table, rule) != OFF]
@@ -105,23 +133,43 @@ class Policy:
         for table, category in (
             ("performance", Category.performance),
             ("security", Category.security),
-            ("compatibility", Category.contract_break),
             ("simplicity", Category.complexity),
         ):
             if self.live_rules(table):
                 found.add(category)
+        if self.rule_level("compatibility", "contract_break") != OFF:
+            found.add(Category.contract_break)
+        if self.rule_level("compatibility", "claim_mismatch") != OFF:
+            found.add(Category.claim_mismatch)
         return frozenset(found)
+
+    def instruction_paths(self) -> tuple[str, ...]:
+        """Default instruction files plus any paths this policy adds. Defaults cannot be removed."""
+        if not self.injection_paths:
+            return DEFAULT_INSTRUCTION_PATHS
+        return self.injection_paths
+
+    def scans_prompt_injection(self) -> bool:
+        """On even without a REVIEW.toml. exclude does not turn it off."""
+        if self.error:
+            return False
+        if not self.active:
+            return True
+        return bool(self.live_rules("prompt_injection"))
+
+    def scans_risky_patterns(self) -> bool:
+        return self.active and bool(self.live_rules("risky_patterns"))
 
     def scans_secrets(self) -> bool:
         return self.active and bool(self.live_rules("secrets"))
 
-    def decide(self, finding: Finding, *, secret: bool = False, locked: bool = False) -> str:
+    def decide(self, finding: Finding, *, table: str | None = None, locked: bool = False) -> str:
         """must_fix, recommend or off for one finding, after rules, path overrides and the severity floor."""
-        return self.grade(finding, secret=secret, locked=locked)[0]
+        return self.grade(finding, table=table, locked=locked)[0]
 
-    def grade(self, finding: Finding, *, secret: bool = False, locked: bool = False) -> tuple[str, str]:
+    def grade(self, finding: Finding, *, table: str | None = None, locked: bool = False) -> tuple[str, str]:
         """The level, and why it is off. The reason is empty unless the level is off."""
-        table = table_of(finding.category, secret=secret)
+        table = table_of(finding.category, table=table)
         if table is None:
             return "recommend", ""
         level = self.rule_level(table, finding.rule)
@@ -152,7 +200,7 @@ class Policy:
         return level, ""
 
     def design_categories(self) -> frozenset[Category]:
-        return self.llm_categories() & {Category.contract_break, Category.complexity}
+        return self.llm_categories() & {Category.contract_break, Category.claim_mismatch, Category.complexity}
 
     def main_categories(self) -> frozenset[Category]:
         return self.llm_categories() - self.design_categories()
@@ -210,6 +258,11 @@ class Policy:
                     "performance_level": self.performance_level,
                     "security_enabled": self.security_enabled,
                     "security_level": self.security_level,
+                    "prompt_injection_enabled": self.prompt_injection_enabled,
+                    "prompt_injection_level": self.prompt_injection_level,
+                    "injection_paths": list(self.instruction_paths()),
+                    "risky_patterns_enabled": self.risky_patterns_enabled,
+                    "risky_patterns_level": self.risky_patterns_level,
                     "compatibility_enabled": self.compatibility_enabled,
                     "compatibility_level": self.compatibility_level,
                     "stable": list(self.stable),
@@ -256,6 +309,56 @@ def _table(data: dict, name: str) -> dict:
     if not isinstance(raw, dict):
         raise PolicyError(f"{name} 必须是表")
     return raw
+
+
+def _instruction_paths(table: dict) -> tuple[str, ...]:
+    """Defaults first, then any extra paths. An empty paths list leaves the defaults in place."""
+    extra = _globs(table, "paths")
+    return tuple(dict.fromkeys(DEFAULT_INSTRUCTION_PATHS + extra))
+
+
+def injection_weakened(base: Policy, head: Policy) -> list[str]:
+    """How head's REVIEW.toml turns the prompt-injection check down relative to base.
+
+    A missing file is the default, which is fully on. Callers skip this when head does not parse.
+    """
+    reasons: list[str] = []
+    if base.prompt_injection_enabled and not head.prompt_injection_enabled:
+        reasons.append("enabled = false")
+    if not (base.prompt_injection_enabled and head.prompt_injection_enabled):
+        return reasons + _injection_paths_removed(base, head) + _injection_overrides(base, head)
+    if base.prompt_injection_level == "must_fix" and head.prompt_injection_level != "must_fix":
+        reasons.append("级别降为 recommend")
+    base_rules = dict(base.rule_levels)
+    head_rules = dict(head.rule_levels)
+    for rule in CATALOG["prompt_injection"]:
+        key = f"prompt_injection.{rule}"
+        before = base_rules.get(key, base.prompt_injection_level)
+        after = head_rules.get(key)
+        if after == OFF and before != OFF:
+            reasons.append(f"子规则 {rule} 被关掉")
+        elif after == "recommend" and before == "must_fix" and head.prompt_injection_level == "must_fix":
+            reasons.append(f"子规则 {rule} 降为 recommend")
+    return reasons + _injection_paths_removed(base, head) + _injection_overrides(base, head)
+
+
+def _injection_off(item: Override) -> tuple[str, ...]:
+    return tuple(sorted(entry for entry in item.off if entry == "prompt_injection" or entry.startswith("prompt_injection.")))
+
+
+def _injection_overrides(base: Policy, head: Policy) -> list[str]:
+    before = {(item.paths, _injection_off(item)) for item in base.overrides if _injection_off(item)}
+    found: list[str] = []
+    for item in head.overrides:
+        turned_off = _injection_off(item)
+        if turned_off and (item.paths, turned_off) not in before:
+            found.append("新增覆盖关掉了 prompt_injection")
+    return found
+
+
+def _injection_paths_removed(base: Policy, head: Policy) -> list[str]:
+    removed = sorted(set(base.instruction_paths()) - set(head.instruction_paths()))
+    return [f"删掉了追加路径 {path}" for path in removed]
 
 
 def _globs(table: dict, name: str) -> tuple[str, ...]:
@@ -367,6 +470,8 @@ def policy_from_toml(text: str) -> Policy:
     secrets = _table(data, "secrets")
     performance = _table(data, "performance")
     security = _table(data, "security")
+    prompt_injection = _table(data, "prompt_injection")
+    risky_patterns = _table(data, "risky_patterns")
     compatibility = _table(data, "compatibility")
     simplicity = _table(data, "simplicity")
     budget = _table(data, "complexity_budget")
@@ -390,6 +495,8 @@ def policy_from_toml(text: str) -> Policy:
         "secrets": secrets,
         "performance": performance,
         "security": security,
+        "prompt_injection": prompt_injection,
+        "risky_patterns": risky_patterns,
         "compatibility": compatibility,
         "simplicity": simplicity,
     }
@@ -408,6 +515,11 @@ def policy_from_toml(text: str) -> Policy:
         performance_level=_level(performance.get("level"), default="recommend"),
         security_enabled=_enabled(security, False),
         security_level=_level(security.get("level"), default="must_fix"),
+        prompt_injection_enabled=_enabled(prompt_injection, True),
+        prompt_injection_level=_level(prompt_injection.get("level"), default="must_fix"),
+        injection_paths=_instruction_paths(prompt_injection),
+        risky_patterns_enabled=_enabled(risky_patterns, False),
+        risky_patterns_level=_level(risky_patterns.get("level"), default="recommend"),
         compatibility_enabled=_enabled(compatibility, False),
         compatibility_level=_level(compatibility.get("level"), default="must_fix"),
         stable=_globs(compatibility, "stable"),
