@@ -21,7 +21,7 @@
 - **示例 PR**：[PR #6](https://github.com/iamharvey/pairrot/pull/6) 上有 pairrot 发的 20 条行内评论和一条摘要，可以直接翻看每条意见的写法。
 - **示例报告**：[`docs/examples/ledger/summary.md`](docs/examples/ledger/summary.md) 是 v0.2.0 在同一个变更上的完整评审结果，确认 21 条，驳回 0 条，未判定 0 条，用了约 8.9 万 token、114 秒。原始数据见 [`report.json`](docs/examples/ledger/report.json)。
 - **可复制的配置**：
-  - 工作流：[GitHub Actions 配置](#github-actions)，可以整段复制，已经固定在 `v0.3.1`；
+  - 工作流：[GitHub Actions 配置](#github-actions)，可以整段复制，已经固定在 `v0.3.2`；
   - 起步规则：`pairrot init` 会在仓库根目录生成一份（内容见 [`REVIEW.example.toml`](src/pairrot/REVIEW.example.toml)），默认先观察、不挡合并。
 
 ## 快速上手
@@ -29,7 +29,7 @@
 需要 Python 3.11 或以上、git 2.x，以及一个 OpenAI 兼容的模型接口。
 
 ```bash
-pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.1"
+pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.2"
 
 export PAIRROT_BASE_URL=https://api.deepseek.com/v1
 export PAIRROT_API_KEY=sk-...
@@ -177,7 +177,7 @@ pairrot export markdown --report pairrot-out/checkout/report.json --out pairrot-
 
 ### GitHub Actions
 
-本仓库自带 [`.github/workflows/pairrot-review.yml`](.github/workflows/pairrot-review.yml)，PR 打开或更新时运行。在其他仓库使用时，把 `pip install .` 换成固定版本的安装（下面用的是 `v0.3.1` 标签）：
+本仓库自带 [`.github/workflows/pairrot-review.yml`](.github/workflows/pairrot-review.yml)，PR 打开或更新时运行。在其他仓库使用时，把 `pip install .` 换成固定版本的安装（下面用的是 `v0.3.2` 标签）：
 
 ```yaml
 name: pairrot review
@@ -209,7 +209,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.1"
+      - run: pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.2"
 
       # 任何标签变化都会在同一个 head 上重跑，缓存的报告直接复用，不再调模型
       - uses: actions/cache/restore@v4
@@ -282,7 +282,7 @@ pairrot-review:
     GIT_DEPTH: "0"                # 需要完整历史来算 merge-base
     PAIRROT_DISABLE_DOTENV: "1"
   script:
-    - pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.1"
+    - pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.2"
     - status=0
     - >
       pairrot review --repo .
@@ -438,9 +438,11 @@ instruction = "如果新增的外部调用没有超时，报 error_handling，�
 |---|---|
 | `[correctness]` | `logic_error` 逻辑错误，`error_handling` 错误处理缺失 |
 | `[secrets]` | `private_key` 私钥，`token` 带固定前缀的令牌，`credential` 赋给 password、api_key 等变量的明文 |
-| `[security]` | `injection` 注入，`authz` 越权，`sensitive_data` 敏感数据外泄，`timing_compare` 非恒定时间比较，`other` |
+| `[prompt_injection]` | `override` 覆盖已有指令，`exfiltration` 读取凭据并外传，`reviewer_bypass` 要求评审放行，`hidden_text` 隐藏文字，`tag_escape` 打断数据标签。默认开启，`exclude` 管不到它 |
+| `[risky_patterns]` | `remote_script` 下载后执行，`tls_off` 关掉证书校验，`plaintext_http` 明文地址，`dangerous_call` 危险调用，`loose_perms` 全局可写，`ci_workflow` 工作流权限。默认关闭，只做确定性匹配 |
+| `[security]` | `injection` 注入，`authz` 越权，`sensitive_data` 敏感数据外泄，`timing_compare` 非恒定时间比较，`other`。由模型判断利用路径 |
 | `[performance]` | `n_plus_one` 循环里逐条查询，`quadratic` 平方复杂度，`repeated_io` 循环里重复读或解析，`other` |
-| `[compatibility]` | `contract_break` |
+| `[compatibility]` | `contract_break`，`claim_mismatch` 声明和实现不一致（默认 `off`，要试用写 `rules = { claim_mismatch = "recommend" }`） |
 | `[simplicity]` | `stdlib` 标准库可替代，`dead_code` 死代码，`needless_abstraction` 多余抽象，`duplicate` 重复实现，`ceremony` 多余的重试和兜底，`other` |
 
 ```toml
@@ -480,6 +482,8 @@ must_fix_min_severity = "S3"     # 核心模块 S3 也挡合并
 - **一个类别的子规则全部关掉，等于关掉这个类别**，这个视角的模型调用直接省掉。
 - **安全、性能、简化类意见**由评审模型标注 `rule`，标注不认识的子规则时归为 `other`。
 - **第一次接入时噪音少一些**：改动前就存在的问题默认不挡合并、只进摘要；没有 `REVIEW.toml` 时，这类问题也不会挂到行内。
+- **提示词注入检查默认就开**，没有 `REVIEW.toml` 也跑。它不经过模型，`exclude` 和文件预算都管不到。`override` 和 `exfiltration` 只查指令文件（`SKILL.md`、`AGENTS.md`、`CLAUDE.md`、`.cursor/rules/**`、`skills/**` 等），其余子规则查所有文本文件。`[prompt_injection] paths` 只能追加路径。把这张表关掉、把子规则设成 `off`、把级别降成 `recommend`、用 `[[override]]` 关掉它，或删掉追加路径，都会产生「【危险】关闭了提示词注入检查」，check 失败，需要维护者加 `pairrot-override`。合进主干之后不再告警。`--policy` 不触发这道比较。
+- **`[risky_patterns]` 和 `[security]` 不同。** 前者是正则匹配，默认关闭，打开后默认 `recommend`，只进摘要。后者由模型判断有没有利用路径。`exclude` 和 `[[override]]` 对前者生效。
 
 ### 故意不兼容与简化
 

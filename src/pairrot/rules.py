@@ -18,6 +18,21 @@ CATALOG: dict[str, dict[str, str]] = {
         "token": "带固定前缀的令牌，例如 AKIA、ghp_、sk-、xoxb-、Bearer",
         "credential": "赋给 password、secret、api_key 等变量的明文值",
     },
+    "prompt_injection": {
+        "override": "要求忽略或覆盖已有指令、系统提示或规则",
+        "exfiltration": "读取凭据并送出仓库",
+        "reviewer_bypass": "要求评审工具不要报告或把问题标成安全",
+        "hidden_text": "零宽字符、双向控制字符，或藏在注释里的指令",
+        "tag_escape": "正文里出现数据标签，用来提前结束送给模型的数据区",
+    },
+    "risky_patterns": {
+        "remote_script": "下载脚本后直接交给 shell 执行",
+        "tls_off": "关掉 TLS 证书校验",
+        "plaintext_http": "用明文 http 访问外部地址",
+        "dangerous_call": "eval、exec、pickle.loads、不安全的 yaml.load、shell=True 或 os.system",
+        "loose_perms": "把权限放宽到所有用户可写",
+        "ci_workflow": "工作流检出 PR 代码、放开全部权限，或把密钥写进日志",
+    },
     "security": {
         "injection": "注入：把外部输入拼进 SQL、命令、路径或模板",
         "authz": "越权：缺少登录、归属或权限校验",
@@ -33,6 +48,7 @@ CATALOG: dict[str, dict[str, str]] = {
     },
     "compatibility": {
         "contract_break": "改了约定，但仓库内仍有按旧约定使用的地方，或破坏了稳定接口",
+        "claim_mismatch": "函数名、文档、注释、帮助文本或 README 说的行为，和代码实际做的不一样",
     },
     "simplicity": {
         "stdlib": "标准库、语言内置或项目已有依赖能替代的手写代码",
@@ -50,14 +66,48 @@ _TABLE_OF = {
     Category.security: "security",
     Category.performance: "performance",
     Category.contract_break: "compatibility",
+    Category.claim_mismatch: "compatibility",
     Category.complexity: "simplicity",
 }
 # Categories whose rule is the category itself, so the reviewer does not tag them.
-_SELF_RULED = {Category.logic_error, Category.error_handling, Category.contract_break}
+_SELF_RULED = {Category.logic_error, Category.error_handling, Category.contract_break, Category.claim_mismatch}
+# A deterministic finding's checked mark selects its table. The category alone would land on security.
+CHECKED_TABLE = {
+    "secret_pattern": "secrets",
+    "injection_pattern": "prompt_injection",
+    "policy_guard": "prompt_injection",
+    "risky_pattern": "risky_patterns",
+}
+# Off unless a REVIEW.toml turns it on. The table level would otherwise enable it.
+DEFAULT_RULE_LEVELS = {"compatibility.claim_mismatch": OFF}
+# Instruction files. A REVIEW.toml paths list adds to this; it cannot remove an entry.
+DEFAULT_INSTRUCTION_PATHS = (
+    "SKILL.md",
+    "*/SKILL.md",
+    "AGENTS.md",
+    "*/AGENTS.md",
+    "CLAUDE.md",
+    "*/CLAUDE.md",
+    ".cursorrules",
+    ".cursor/rules/**",
+    "*.mdc",
+    ".github/copilot-instructions.md",
+    "skills/**",
+    "*/skills/**",
+)
 
 
-def table_of(category: Category, *, secret: bool = False) -> str | None:
-    return "secrets" if secret else _TABLE_OF.get(category)
+def table_of(category: Category, *, table: str | None = None) -> str | None:
+    return table if table is not None else _TABLE_OF.get(category)
+
+
+def checked_table(checked: tuple[str, ...] | list[str]) -> str | None:
+    """The policy table a deterministic finding belongs to, from its verification marks."""
+    for mark in checked:
+        found = CHECKED_TABLE.get(mark)
+        if found:
+            return found
+    return None
 
 
 def rule_for(category: Category, raw: object) -> str:

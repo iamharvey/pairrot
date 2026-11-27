@@ -110,8 +110,8 @@ paths = ["core/**"]
 must_fix_min_severity = "S3"
 """
     )
-    assert policy.decide(_finding(Category.security, rule="token", file="tests/a/b.py"), secret=True) == "off"
-    assert policy.decide(_finding(Category.security, rule="token", file="app.py"), secret=True) == "must_fix"
+    assert policy.decide(_finding(Category.security, rule="token", file="tests/a/b.py"), table="secrets") == "off"
+    assert policy.decide(_finding(Category.security, rule="token", file="app.py"), table="secrets") == "must_fix"
     assert policy.decide(_finding(Category.security, rule="authz", file="tests/x.py")) == "off"
     assert policy.decide(_finding(Category.security, rule="injection", file="tests/x.py")) == "must_fix"
     assert policy.decide(_finding(Category.security, rule="injection", file="scripts/run.py")) == "recommend"
@@ -152,6 +152,16 @@ def test_preexisting_findings_stay_out_of_must_fix_unless_kept():
 def test_bad_rule_settings_are_rejected(text: str):
     with pytest.raises(PolicyError):
         policy_from_toml(text)
+
+
+def test_claim_mismatch_stays_off_until_a_policy_turns_it_on():
+    from pairrot.review import prompt_for
+
+    enabled = policy_from_toml("[compatibility]\nenabled = true\n")
+    assert enabled.rule_level("compatibility", "claim_mismatch") == "off"
+    assert "claim_mismatch" not in prompt_for(enabled, design=True)
+    opted = policy_from_toml('[compatibility]\nenabled = true\nrules = { claim_mismatch = "recommend" }\n')
+    assert "谁会因此用错" in prompt_for(opted, design=True)
 
 
 def test_digest_changes_with_rules():
