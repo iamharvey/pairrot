@@ -339,6 +339,7 @@ def review_change(
             max_changed_lines=budget.max_changed_lines,
             base_sha=base_sha,
             head_sha=head_sha,
+            exclude=policy.exclude,
         )
     except GitError as exc:
         report = _empty_report(

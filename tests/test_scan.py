@@ -11,7 +11,7 @@ from pairrot.baseline import load_baseline, save_baseline, without_baseline
 from pairrot.llm import ChatMessage, Completion, FakeModel
 from pairrot.models import Budget
 from pairrot.pipeline import review_change
-from pairrot.policy import Policy
+from pairrot.policy import Policy, policy_from_toml
 from pairrot.review import audit_prompt
 from pairrot.scan import list_files, scan_tree
 from pairrot.secrets_scan import secret_finding
@@ -189,6 +189,22 @@ def test_list_files_keeps_the_prefix(tmp_path: Path):
     assert chosen == ["src/c.py"]
     assert list_files(repo, rev, "./src/")[0] == ["src/c.py"]
     assert skipped == []
+
+
+def test_list_files_skips_excluded_paths(tmp_path: Path):
+    repo = init_repo(tmp_path / "repo")
+    write(repo, "src/app.py", "x = 1\n")
+    write(repo, "tests/test_app.py", "def test_app():\n    pass\n")
+    write(repo, "skills/nested/SKILL.md", "skill\n")
+    write(repo, "package-lock.json", "{}\n")
+    rev = commit(repo, "files")
+    policy = policy_from_toml('exclude = ["tests/**", "skills/"]\n')
+    chosen, skipped = list_files(repo, rev, "", policy.exclude)
+    assert chosen == ["src/app.py"]
+    reasons = {span.path: span.reason for span in skipped}
+    assert reasons["tests/test_app.py"] == "配置排除"
+    assert reasons["skills/nested/SKILL.md"] == "配置排除"
+    assert reasons["package-lock.json"] == "锁文件"
 
 
 def test_a_missing_path_does_not_erase_the_baseline(tmp_path: Path):

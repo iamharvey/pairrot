@@ -163,6 +163,18 @@ def file_diff(
     return completed.stdout
 
 
+EXCLUDE_REASON = "配置排除"
+
+
+def is_excluded(path: str, patterns: tuple[str, ...]) -> bool:
+    """True when path matches an exclude pattern already parsed from REVIEW.toml."""
+    if not patterns:
+        return False
+    from pairrot.policy import matches
+
+    return matches(path, patterns)
+
+
 def skip_reason(path: str) -> str | None:
     name = path.replace("\\", "/").split("/")[-1].lower()
     if name in LOCK_BASENAMES or name.endswith(".lock") or name.endswith(".lockb"):
@@ -308,6 +320,7 @@ def take_snapshot(
     max_changed_lines: int = 2000,
     base_sha: str | None = None,
     head_sha: str | None = None,
+    exclude: tuple[str, ...] = (),
 ) -> Snapshot:
     root = Path(repo)
     pinned_base = base_sha or resolve_sha(root, base)
@@ -332,6 +345,8 @@ def take_snapshot(
         except ValueError:
             added, deleted = 0, 0
         reason = skip_reason(path)
+        if reason is None and is_excluded(path, exclude):
+            reason = EXCLUDE_REASON
         if reason:
             skipped.append(
                 FileSpan(

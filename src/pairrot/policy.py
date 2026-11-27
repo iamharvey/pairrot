@@ -76,6 +76,7 @@ class Policy:
     must_fix_min_severity: str = "S3"
     overrides: tuple[Override, ...] = ()
     preexisting: str = "recommend"
+    exclude: tuple[str, ...] = ()
     error: str | None = None
 
     @property
@@ -184,6 +185,8 @@ class Policy:
             parts.append(f"complexity_budget={len(self.budget_limits)}项")
         if self.extras:
             parts.append(f"extra={len(self.extras)}")
+        if self.exclude:
+            parts.append(f"exclude={len(self.exclude)}")
         text = "、".join(parts)
         if self.source == "local":
             return "本地规则，CI 不会用这份。" + text
@@ -220,6 +223,7 @@ class Policy:
                     "must_fix_min_severity": self.must_fix_min_severity,
                     "overrides": [item.as_dict() for item in self.overrides],
                     "preexisting": self.preexisting,
+                    "exclude": list(self.exclude),
                 },
                 sort_keys=True,
                 ensure_ascii=False,
@@ -259,6 +263,21 @@ def _globs(table: dict, name: str) -> tuple[str, ...]:
     if not isinstance(raw, list) or not all(isinstance(item, str) and item.strip() for item in raw):
         raise PolicyError(f"{name} 必须是非空字符串数组")
     return tuple(norm_path(item.strip()) for item in raw)
+
+
+def _exclude(data: dict) -> tuple[str, ...]:
+    """Directory patterns ending in / cover that directory and everything under it."""
+    found: list[str] = []
+    for pattern in _globs(data, "exclude"):
+        if pattern.endswith("/"):
+            stem = pattern.rstrip("/")
+            if not stem:
+                raise PolicyError("exclude 不能是空路径")
+            pattern = f"{stem}/**"
+        elif not pattern:
+            raise PolicyError("exclude 不能是空路径")
+        found.append(pattern)
+    return tuple(found)
 
 
 def _limits(table: dict) -> tuple[tuple[str, int], ...]:
@@ -402,6 +421,7 @@ def policy_from_toml(text: str) -> Policy:
         must_fix_min_severity=_severity(data.get("must_fix_min_severity", "S3"), "must_fix_min_severity"),
         overrides=_overrides(data),
         preexisting=preexisting,
+        exclude=_exclude(data),
     )
 
 

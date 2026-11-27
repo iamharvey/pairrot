@@ -32,7 +32,7 @@ from pairrot.review import (
     parse_review_output,
 )
 from pairrot.secrets_scan import secret_finding
-from pairrot.snapshot import GitError, resolve_sha, run_git, skip_reason
+from pairrot.snapshot import EXCLUDE_REASON, GitError, is_excluded, resolve_sha, run_git, skip_reason
 from pairrot.tools import RepoTools
 from pairrot.verify import verify_findings
 
@@ -42,7 +42,9 @@ _PENDING = "尚未体检"
 _STATE = "scan_state.json"
 
 
-def list_files(repo: Path, rev: str, prefix: str) -> tuple[list[str], list[FileSpan]]:
+def list_files(
+    repo: Path, rev: str, prefix: str, exclude: tuple[str, ...] = ()
+) -> tuple[list[str], list[FileSpan]]:
     """Committed files under prefix, split into scannable paths and skipped spans."""
     shown = run_git(repo, "ls-tree", "-r", "--name-only", rev)
     if shown.returncode != 0:
@@ -54,6 +56,8 @@ def list_files(repo: Path, rev: str, prefix: str) -> tuple[list[str], list[FileS
         if wanted and name != wanted and not name.startswith(wanted + "/"):
             continue
         reason = skip_reason(name)
+        if reason is None and is_excluded(name, exclude):
+            reason = EXCLUDE_REASON
         if reason:
             skipped.append(FileSpan(path=name, status="A", reason=reason))
             continue
@@ -314,7 +318,7 @@ def scan_tree(
             raise GitError(policy.error)
         known = load_baseline(baseline) if baseline else set()
         wanted = norm_path(path).strip("/")
-        files, skipped = list_files(root, pinned, wanted)
+        files, skipped = list_files(root, pinned, wanted, policy.exclude)
         if wanted and not files and not skipped:
             raise GitError(f"路径 {wanted} 下没有文件")
         state = _load_state(state_path, pinned, wanted, policy.digest())

@@ -31,6 +31,14 @@ enabled = true
 level = "recommend"              # 先只做参考；有测试锁定、想让它挡合并时改成 must_fix
 extension_points = []            # 故意留的扩展点，例如 ["plugins/*"]
 
+# 这些路径不送模型，也不扫密钥。目录末尾的 / 表示该目录下全部文件。
+# exclude = [
+#   "tests/**",
+#   "**/*_test.py",
+#   "**/.cursor/**",
+#   "skills/",
+# ]
+
 # 按路径覆盖：例如测试夹具里的假密钥不报。子规则清单见 README
 # [[override]]
 # paths = ["tests/**"]
