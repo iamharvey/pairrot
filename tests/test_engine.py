@@ -20,6 +20,7 @@ from pairrot.models import (
 )
 from pairrot.evidence import PACK_LIMIT, EvidencePiece, render_pack
 from pairrot.pipeline import _decide_status, review_change
+from pairrot.policy import policy_from_toml
 from pairrot.redact import strip_secrets
 from pairrot.review import REVIEW_SYSTEM_PROMPT, validate_candidate
 from pairrot.snapshot import take_snapshot
@@ -730,6 +731,31 @@ def test_skip_lock_vendor_generated_and_migration_snapshots(tmp_path: Path):
     assert snapshot.reviewed[0].path == "app.py"
     assert snapshot.partial
     assert any(span.reason.startswith("超过文件数阈值") for span in snapshot.unreviewed)
+
+
+def test_exclude_skips_before_the_file_budget(tmp_path: Path):
+    repo = init_repo(tmp_path / "repo")
+    seed(repo, "def add(a, b):\n    return a + b\n", "app.py")
+    write(repo, "app.py", "def add(a, b):\n    return a - b\n")
+    write(repo, "z.py", "value = 1\n")
+    write(repo, "tests/test_app.py", "def test_add():\n    assert True\n")
+    write(repo, "docs/note.md", "note\n")
+    write(repo, "skills/nested/SKILL.md", "skill\n")
+    write(repo, "package-lock.json", "{}\n")
+    tip = commit(repo, "mixed")
+    base = git_parent(repo)
+    policy = policy_from_toml('exclude = ["tests/**", "*.md", "skills/"]\n')
+    snapshot = take_snapshot(repo, base, tip, max_files=1, exclude=policy.exclude)
+    reasons = {span.path: span.reason for span in snapshot.unreviewed}
+    assert reasons["tests/test_app.py"] == "配置排除"
+    assert reasons["docs/note.md"] == "配置排除"
+    assert reasons["skills/nested/SKILL.md"] == "配置排除"
+    assert reasons["package-lock.json"] == "锁文件"
+    reviewed = {span.path for span in snapshot.reviewed}
+    assert len(reviewed) == 1
+    assert reviewed < {"app.py", "z.py"}
+    leftover = ({"app.py", "z.py"} - reviewed).pop()
+    assert reasons[leftover].startswith("超过文件数阈值")
 
 
 def test_rename_uses_the_new_path(tmp_path: Path):

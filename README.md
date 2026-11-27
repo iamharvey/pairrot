@@ -21,7 +21,7 @@
 - **示例 PR**：[PR #6](https://github.com/iamharvey/pairrot/pull/6) 上有 pairrot 发的 20 条行内评论和一条摘要，可以直接翻看每条意见的写法。
 - **示例报告**：[`docs/examples/ledger/summary.md`](docs/examples/ledger/summary.md) 是 v0.2.0 在同一个变更上的完整评审结果，确认 21 条，驳回 0 条，未判定 0 条，用了约 8.9 万 token、114 秒。原始数据见 [`report.json`](docs/examples/ledger/report.json)。
 - **可复制的配置**：
-  - 工作流：[GitHub Actions 配置](#github-actions)，可以整段复制，已经固定在 `v0.3.0`；
+  - 工作流：[GitHub Actions 配置](#github-actions)，可以整段复制，已经固定在 `v0.3.1`；
   - 起步规则：`pairrot init` 会在仓库根目录生成一份（内容见 [`REVIEW.example.toml`](src/pairrot/REVIEW.example.toml)），默认先观察、不挡合并。
 
 ## 快速上手
@@ -29,7 +29,7 @@
 需要 Python 3.11 或以上、git 2.x，以及一个 OpenAI 兼容的模型接口。
 
 ```bash
-pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.0"
+pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.1"
 
 export PAIRROT_BASE_URL=https://api.deepseek.com/v1
 export PAIRROT_API_KEY=sk-...
@@ -68,7 +68,7 @@ pairrot scan --repo . --rev HEAD --path src --out pairrot-scan --save-baseline p
 pairrot review --repo . --base origin/main --head HEAD --baseline pairrot-baseline.json --out pairrot-out
 ```
 
-体检看的是这个提交上的文件全文，不是 diff。规则从同一个提交的 `REVIEW.toml` 读取。不往 PR 上发评论。锁文件、vendor 和生成文件会跳过，超过 1500 行的文件也会跳过。契约和简化建议只在 diff 评审里做，体检不报这两类。费用或文件数到达本次上限就停下，进度在 `scan_state.json`。`--save-baseline` 只在全部文件都体检完时写出。基线不收录密钥：密钥的指纹没有行号，收录后一条新的同名密钥会被当成旧问题。
+体检看的是这个提交上的文件全文，不是 diff。规则从同一个提交的 `REVIEW.toml` 读取。不往 PR 上发评论。锁文件、vendor、生成文件，以及 [`exclude`](#子规则按路径覆盖和降噪) 里的路径会跳过，超过 1500 行的文件也会跳过。契约和简化建议只在 diff 评审里做，体检不报这两类。费用或文件数到达本次上限就停下，进度在 `scan_state.json`。`--save-baseline` 只在全部文件都体检完时写出。基线不收录密钥：密钥的指纹没有行号，收录后一条新的同名密钥会被当成旧问题。
 
 **适合**：
 
@@ -177,7 +177,7 @@ pairrot export markdown --report pairrot-out/checkout/report.json --out pairrot-
 
 ### GitHub Actions
 
-本仓库自带 [`.github/workflows/pairrot-review.yml`](.github/workflows/pairrot-review.yml)，PR 打开或更新时运行。在其他仓库使用时，把 `pip install .` 换成固定版本的安装（下面用的是 `v0.3.0` 标签）：
+本仓库自带 [`.github/workflows/pairrot-review.yml`](.github/workflows/pairrot-review.yml)，PR 打开或更新时运行。在其他仓库使用时，把 `pip install .` 换成固定版本的安装（下面用的是 `v0.3.1` 标签）：
 
 ```yaml
 name: pairrot review
@@ -209,7 +209,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.0"
+      - run: pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.1"
 
       # 任何标签变化都会在同一个 head 上重跑，缓存的报告直接复用，不再调模型
       - uses: actions/cache/restore@v4
@@ -282,7 +282,7 @@ pairrot-review:
     GIT_DEPTH: "0"                # 需要完整历史来算 merge-base
     PAIRROT_DISABLE_DOTENV: "1"
   script:
-    - pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.0"
+    - pip install "git+https://github.com/iamharvey/pairrot.git@v0.3.1"
     - status=0
     - >
       pairrot review --repo .
@@ -455,6 +455,13 @@ rules = { error_handling = "recommend" }   # 逻辑错误挡合并，错误处�
 enabled = true
 rules = { timing_compare = "off", authz = "recommend" }
 
+exclude = [                      # 送模型之前跳过。末尾 / 表示该目录下全部文件
+  "tests/**",
+  "**/*_test.py",
+  "**/.cursor/**",
+  "skills/",
+]
+
 [[override]]                     # 按路径覆盖，按书写顺序生效，后写的优先
 paths = ["tests/**", "fixtures/**"]
 off = ["secrets", "security.authz"]   # 写整个类别，或者 类别.子规则
@@ -468,7 +475,8 @@ paths = ["payments/**"]
 must_fix_min_severity = "S3"     # 核心模块 S3 也挡合并
 ```
 
-- **关掉的规则不花验证的钱**。全局关掉的子规则不会出现在评审提示词里；按路径关掉的，在送给验证者之前就丢弃。`report.json` 的 `dropped` 写明原因：`rule off in REVIEW.toml` 是子规则关闭，`path override in REVIEW.toml` 是路径覆盖，`preexisting off in REVIEW.toml` 是 `preexisting = "off"`。
+- **`exclude` 在送模型之前跳过整份文件。** `*` 可以跨目录，所以 `*.md` 和 `*_test.py` 匹配任意深度。末尾写 `/` 表示这个目录以及下面的全部文件，`skills/` 等同于 `skills/**`。这些文件不占文件数和行数预算，也不扫密钥、不计入复杂度，报告里记为「配置排除」。diff 评审和 `pairrot scan` 都认这份列表。
+- **`[[override]]` 在文件已经进入评审之后改级别或丢掉某一类意见。** 关掉的规则不花验证的钱。全局关掉的子规则不会出现在评审提示词里；按路径关掉的，在送给验证者之前就丢弃。`report.json` 的 `dropped` 写明原因：`rule off in REVIEW.toml` 是子规则关闭，`path override in REVIEW.toml` 是路径覆盖，`preexisting off in REVIEW.toml` 是 `preexisting = "off"`。路径已经在 `exclude` 里时，同一路径上的覆盖不会执行。
 - **一个类别的子规则全部关掉，等于关掉这个类别**，这个视角的模型调用直接省掉。
 - **安全、性能、简化类意见**由评审模型标注 `rule`，标注不认识的子规则时归为 `other`。
 - **第一次接入时噪音少一些**：改动前就存在的问题默认不挡合并、只进摘要；没有 `REVIEW.toml` 时，这类问题也不会挂到行内。

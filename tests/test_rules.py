@@ -22,7 +22,7 @@ from pairrot.models import (
     Verdict,
 )
 from pairrot.pipeline import review_change
-from pairrot.policy import PolicyError, policy_from_toml
+from pairrot.policy import PolicyError, matches, policy_from_toml
 from pairrot.publish_github import plan_publication
 from pairrot.review import prompt_for, validate_candidate
 from tests.conftest import commit, init_repo, write
@@ -143,6 +143,10 @@ def test_preexisting_findings_stay_out_of_must_fix_unless_kept():
         '[[override]]\noff = ["secrets"]\n',
         'must_fix_min_severity = "S4"\n',
         'preexisting = "hide"\n',
+        'exclude = "tests/**"\n',
+        'exclude = [""]\n',
+        'exclude = ["/"]\n',
+        'exclude = [1]\n',
     ],
 )
 def test_bad_rule_settings_are_rejected(text: str):
@@ -153,6 +157,21 @@ def test_bad_rule_settings_are_rejected(text: str):
 def test_digest_changes_with_rules():
     base = "[security]\nenabled = true\n"
     assert policy_from_toml(base).digest() != policy_from_toml(base + 'rules = { authz = "off" }\n').digest()
+
+
+def test_exclude_matches_a_suffix_anywhere_and_a_directory_prefix():
+    bare = policy_from_toml("[correctness]\nenabled = true\n")
+    policy = policy_from_toml(
+        'exclude = ["*.md", "skills/", "**/*_test.py"]\n[correctness]\nenabled = true\n'
+    )
+    assert policy.exclude == ("*.md", "skills/**", "**/*_test.py")
+    assert matches("docs/guide.md", policy.exclude)
+    assert matches("skills/nested/SKILL.md", policy.exclude)
+    assert matches("pkg/foo_test.py", policy.exclude)
+    assert not matches("src/app.py", policy.exclude)
+    assert "exclude=3" in policy.note()
+    assert "exclude=" not in bare.note()
+    assert bare.digest() != policy.digest()
 
 
 def test_prompt_lists_live_rules_and_names_the_ones_off():
